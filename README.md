@@ -3,7 +3,7 @@ The second is the local location of the output, the third is the mode (train or 
 
 ```bash
 python run_rl_agent.py <your-output-dir> train > run.log &
-python run_rl_agent.py <your-output-dir> evaluate <your-other-outdir> > run_rnnbase_test.log &
+python run_rl_agent.py <your-output-dir> evaluate <your-other-outdir> > eval.log &
 ```
 
 The main script's role is to start the process of either training or evaluating the model's process, determined by the arguments provided.
