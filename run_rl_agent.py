@@ -19,7 +19,7 @@ import math
 
 if len(sys.argv) < 3:
     print("Train Usage: python run_rl_agent.py <your-outdir-name> train")
-    print("Evaluate Usage: python run_rl_agent.py <your-output-dir> evaluate <your-other-outdir>")
+    print("Evaluate Usage: python run_rl_agent.py <your-other-outdir> evaluate <your-outdir-name>")
     exit(1)
 
 # Local output filename
@@ -29,6 +29,8 @@ mode = sys.argv[2]
 # Optional third argument: name of checkpoint model folder name.
 # For training, invoke with three arguments 
 if len(sys.argv) == 4:
+    # use the directory from the model training for
+    # the checkpoint here.
     checkpointmodel = sys.argv[3]
 
 
