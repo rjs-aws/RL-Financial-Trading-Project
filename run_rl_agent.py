@@ -83,6 +83,8 @@ elif mode == 'evaluate':
 # path to the training script
 # The RL toolkit and deep learning framework you want to use.
 # The training parameters, such as the instance count, job name, and S3 path for output. 
+# can be trained locally, by using train_instance_type='local_gpu', however this requires a
+# 
 estimator = RLEstimator(source_dir='src',
                         entry_point=entryfile,
                         dependencies=["common/sagemaker_rl"],
@@ -91,7 +93,7 @@ estimator = RLEstimator(source_dir='src',
                         framework=RLFramework.MXNET,
                         role=role,
                         train_instance_count=1,
-                        train_instance_type='ml.c5.9xlarge',
+                        train_instance_type='ml.c5.9xlarge',  
                         output_path=s3_output_path,
                         base_job_name=job_name_prefix,
                         hyperparameters = {"RLCOACH_PRESET" : "preset-trading"})

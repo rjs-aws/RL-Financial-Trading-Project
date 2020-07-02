@@ -31,41 +31,50 @@ class TradingEnv(gym.Env):
     """
         A simple environment for financial trading
         with Deep Reinforcement Learning
+        
+        asset: the name of the asset to trade
+        mode: Decision can be made on past (using actual past) or future (using RNN forecast)
+        data: datasets directly from the assets' files
+        observations: dict where Key: assetname, Value: corresponding list of observations for the asset (observations are 'Close' prices from the dataset)
     """
 
-    # asset: the name of the asset to trade
-    # the mode: Decision can be made on past (using actual past) or future (using RNN forecast)
     # The size of the state space--here, the number of previous time steps or forecasted horizon used for decision making
     def __init__(self,
-                 asset = 'AMZN_test',    
-                 mode = 'future_static', 
+                 assets = ['GOOG_test', 'AMZN_test', 'MSFT_test'], # TODO: find a way to invoke the constuctor with an argument list 
+                 mode = 'past', 
                  span = 9                
                  ):
+             
         
-        datafile = DATA_DIR + asset + '.csv'
-        
-        self.asset = asset
+        self.assets = assets
         self.mode = mode
         self.span = span # span is the state space
-        self.data = pd.read_csv(datafile) 
-        self.observations = self.getObservations(datafile) # store the "Close" prices from the csv into a local member list
-        self.steps = len(self.observations) - 1   # Number of time steps in data file
+        self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
+        self.observations = self.getAllObservations(assets) # store the "Close" prices from each corresponding csv into a local member dict
+        # TODO: remove
+        self.steps = len(self.observations['AMZN_test']) - 1   # Number of time steps in data file
         
         # RNN model if decision based on forecasted horizon instead of lag
         if self.mode == 'future': 
-            self.rnn_model = CUR_DIR + '/custom-rnn.h5' # Custom RNN model
+            self.rnn_model = CUR_DIR + asset + '-custom-rnn.h5' # Custom RNN model
+        
         elif self.mode == 'future_static':
             self.horizons = DATA_DIR + asset + '_horizons.npy' # Horizons pre-calculated with custom RNN model
         
         # Output filename
         self.csv_file = CSV_DIR
         
-        # Action space contains 3 discrete states: BUY, SELL, SIT
-        self.action_space = gym.spaces.Discrete(3) 
+        # Action space contains 3 discrete states: BUY, SELL, SIT.
+        NUM_ACTION_STATES = 3
+        NUM_ASSETS = len(assets)
+        
+        # Each requires a corresponding action
+        # M x N, where actions (M) is 3, and num_assets (N) is the length of the assets list
+        self.action_space = gym.spaces.MultiDiscrete([NUM_ACTION_STATES] * NUM_ASSETS)
 
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations. 
-        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (self.span,), dtype = np.float32)
+        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (self.span, NUM_ASSETS), dtype = np.float32)
  
     # Initializes a training episode.
     def reset(self):
@@ -177,6 +186,21 @@ class TradingEnv(gym.Env):
                     # value in the fourth index is "Close"
                     vec.append(float(line.split(",")[4]))
             return vec
+        
+    
+    def getAllObservations(self, asset_list, data_dir="./datasets/"):
+        """
+            Create an observations dict where
+            key is asset name and value is
+            observations from the corresponding file
+        """
+        asset_dict = {}
+        for asset in asset_list:
+            data_file = '{}{}.csv'.format(data_dir, asset)
+            observations = self.getObservations(data_file)
+            print('Observations for {} retrieved from {}'.format(asset, data_file))
+            asset_dict[asset] = observations
+        return asset_dict
 
 
     # Implement a RNN enocoder in case the state is defined based on forecasted horizon
@@ -273,3 +297,19 @@ class TradingEnv(gym.Env):
     def sigmoid(self, x):
             return 1 / (1 + math.exp(-x))
         
+    
+    def _get_data_sets(self, assets_list, data_dir='./datasets/'):
+            """
+                Given a list of assets, retrieve and return their datasets.
+                Returns a dictionary where asset name is key (eg. AMZN), corresponding csv data
+                read via pandas is value.
+            """
+            asset_dict = {}
+            for asset in assets_list:
+                # XXXX_test.csv
+                data_file = '{}{}.csv'.format(data_dir, asset)
+                asset_csv_data = pd.read_csv(data_file)
+                # remove _test from asset name
+                asset_name = asset[0: asset.index("_")]
+                asset_dict[asset_name] = asset_csv_data
+            return asset_dict
