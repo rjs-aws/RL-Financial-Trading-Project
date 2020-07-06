@@ -5,7 +5,7 @@ Jeremy David Curuksu, AWS
 
 """
 import gym
-import gym.spaces
+from gym import spaces
 import numpy as np
 import pandas as pd
 import math
@@ -46,12 +46,14 @@ class TradingEnv(gym.Env):
                  ):
              
         
+        self.csv_file = CSV_DIR # Output filename
         self.assets = assets
         self.mode = mode
-        self.span = span # span is the state space
+        self.span = span # number of days in the past/future
         self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
         self.observations = self.getAllObservations(assets) # store the "Close" prices from each corresponding csv into a local member dict
-        # TODO: remove
+
+        # TODO: do properly; the number of steps is determined by the length of the test file.
         self.steps = len(self.observations['AMZN_test']) - 1   # Number of time steps in data file
         
         # RNN model if decision based on forecasted horizon instead of lag
@@ -61,8 +63,6 @@ class TradingEnv(gym.Env):
         elif self.mode == 'future_static':
             self.horizons = DATA_DIR + asset + '_horizons.npy' # Horizons pre-calculated with custom RNN model
         
-        # Output filename
-        self.csv_file = CSV_DIR
         
         # Action space for each asset contains 3 discrete states: BUY, SELL, SIT.
         NUM_ACTION_STATES = 3
@@ -70,11 +70,13 @@ class TradingEnv(gym.Env):
         
         # Each requires a corresponding action
         # M x N, where actions (M) is 3, and num_assets (N) is the length of the assets list
-        self.action_space = gym.spaces.MultiDiscrete([NUM_ACTION_STATES] * NUM_ASSETS)
+        self.action_space = spaces.MultiDiscrete([NUM_ACTION_STATES] * NUM_ASSETS)
 
         # Observation space is defined from the data min and max
-        # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations. 
-        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (self.span, NUM_ASSETS), dtype = np.float32)
+        # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
+        # (10, 3, 3) in its current form: where dimensions are the num of days, num of assets, num of assets
+        self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (self.span, NUM_ASSETS, NUM_ASSETS), dtype = np.float32)
+        
  
     # Initializes a training episode.
     def reset(self):
