@@ -64,7 +64,7 @@ class TradingEnv(gym.Env):
         # Output filename
         self.csv_file = CSV_DIR
         
-        # Action space contains 3 discrete states: BUY, SELL, SIT.
+        # Action space for each asset contains 3 discrete states: BUY, SELL, SIT.
         NUM_ACTION_STATES = 3
         NUM_ASSETS = len(assets)
         
