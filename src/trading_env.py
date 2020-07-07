@@ -40,7 +40,7 @@ class TradingEnv(gym.Env):
 
     # The size of the state space--here, the number of previous time steps or forecasted horizon used for decision making
     def __init__(self,
-                 assets = ['GOOG_test', 'AMZN_test', 'MSFT_test'], # TODO: find a way to invoke the constuctor with an argument list 
+                 assets = ['GOOG_test', 'AMZN_test', 'MSFT_test', 'AAPL_test'], # TODO: find a way to invoke the constuctor with an argument list 
                  mode = 'past', 
                  span = 9                
                  ):
@@ -65,17 +65,18 @@ class TradingEnv(gym.Env):
         
         
         # Action space for each asset contains 3 discrete states: BUY, SELL, SIT.
-        NUM_ACTION_STATES = 3
+        NUM_ACTION_STATES = 21 # number of actions in discrete action space
         NUM_ASSETS = len(assets)
         
         # Each requires a corresponding action
         # M x N, where actions (M) is 3, and num_assets (N) is the length of the assets list
+        # eg. with 4 assets: MultiDiscrete([21 21 21 21])
         self.action_space = spaces.MultiDiscrete([NUM_ACTION_STATES] * NUM_ASSETS)
 
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
-        # (10, 3, 3) in its current form: where dimensions are the num of days, num of assets, num of assets
-        self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (self.span, NUM_ASSETS, NUM_ASSETS), dtype = np.float32)
+        # Box(9, 4, 4) in its current form: where dimensions are the num of days, num of assets, num of assets
+        self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (self.span,), dtype = np.float32)
         
  
     # Initializes a training episode.
@@ -90,7 +91,7 @@ class TradingEnv(gym.Env):
         # to take its first action
         self.t = 0 
         self.total_profit = 0
-        self.inventory = []
+        self.inventory = [] # TODO: determine representation for inventory: either list of asset_name : asset or dict with asset_name : List(asset)
         self.infos = []
         
         # If using 'forecasts' to take decisions, train a custom RNN forecasting model
@@ -116,7 +117,9 @@ class TradingEnv(gym.Env):
         Increment time 
         Action is either: buy, sit or sell
         """
-            
+        # action_space is multidiscrete space with length of assets
+        # TODO Iterate through assets and determine corresponding action
+                
         # Action.BUY:
         if action == 1:
             # add to the inventory list the price at the index corresponding to the current
@@ -151,7 +154,6 @@ class TradingEnv(gym.Env):
         obs = self.getState(self.observations, self.t, self.span + 1, self.mode)
             
         # The episode ends when the number of timesteps equals the predefined number of steps.
-        # TODO watch how much money? assess profit, how much spent how much risk
         if self.t >= self.steps:
             done = True 
         else:
@@ -304,7 +306,7 @@ class TradingEnv(gym.Env):
             """
                 Given a list of assets, retrieve and return their datasets.
                 Returns a dictionary where asset name is key (eg. AMZN), corresponding csv data
-                read via pandas is value.
+                read via pandas is value. Stored in the class internally.
             """
             asset_dict = {}
             for asset in assets_list:
