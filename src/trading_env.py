@@ -20,12 +20,14 @@ from keras.optimizers import Adam
 from keras.layers.core import Dense, Dropout, Activation
 from config import *
 from actions import Action
-from collections import deque
+# from collections import deque
+import collections
 from pprint import pprint
 import csv
 import h5py
 
 print('Keras backend is: ', keras.backend.backend())
+    
 
 class TradingEnv(gym.Env):
     """
@@ -45,13 +47,18 @@ class TradingEnv(gym.Env):
                  span = 9                
                  ):
              
-        
+        NUM_ASSETS = len(assets)
+            
         self.csv_file = CSV_DIR # Output filename
         self.assets = assets
         self.mode = mode
         self.span = span # number of days in the past/future
         self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
-        self.observations = self.getAllObservations(assets) # store the "Close" prices from each corresponding csv into a local member dict
+        self.inventory = [None] * NUM_ASSETS # each index corresponds to the asset, here GOOG is [0] 
+
+        # store the "Close" prices from each corresponding csv into a local member dict, key is literal asset name:
+        # XXX_test, value is list of prices
+        self.observations = self.getAllObservations(assets) 
 
         # TODO: do properly; the number of steps is determined by the length of the test file.
         self.steps = len(self.observations['AMZN_test']) - 1   # Number of time steps in data file
@@ -63,22 +70,26 @@ class TradingEnv(gym.Env):
         elif self.mode == 'future_static':
             self.horizons = DATA_DIR + asset + '_horizons.npy' # Horizons pre-calculated with custom RNN model
         
+        # number of actions in discrete action space (0-20), where (value - 10) is
+        # the corresponding action to take for the asset. Positive value is buy n stocks
+        # for the given asset, negative value is sell n stocks for the value.
+        # eg: value = 20; 20 - 10 = 10; buy 10 stocks for this asset
+        # value = 4; 4 - 10 = -6; sell 6 stocks for this asset
         
-        # Action space for each asset contains 3 discrete states: BUY, SELL, SIT.
-        NUM_ACTION_STATES = 21 # number of actions in discrete action space
-        NUM_ASSETS = len(assets)
-        
-        # Each requires a corresponding action
-        # M x N, where actions (M) is 3, and num_assets (N) is the length of the assets list
-        # eg. with 4 assets: MultiDiscrete([21 21 21 21])
-        self.action_space = spaces.MultiDiscrete([NUM_ACTION_STATES] * NUM_ASSETS)
+      
+        # Results in a discrete space of num_assets.
+        # Action contains an index into the list of tuples where (asset_name, action)
+        self.action_space = gym.spaces.Box(0, 21, shape=(4,), dtype=np.uint8) 
+               
+        print(self.action_space)
 
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
-        # Box(9, 4, 4) in its current form: where dimensions are the num of days, num of assets, num of assets
-        self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (self.span,), dtype = np.float32)
+        # (4, 10, 1) (4, 11), (44)
+        self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
+       
+        print(self.observation_space)
         
- 
     # Initializes a training episode.
     def reset(self):
         '''
@@ -87,11 +98,12 @@ class TradingEnv(gym.Env):
             inventory: 
             infos: 
         '''
+        print('called reset')
+        
         # Set the state to the initial state--the agent will use this initial state 
         # to take its first action
         self.t = 0 
         self.total_profit = 0
-        self.inventory = [] # TODO: determine representation for inventory: either list of asset_name : asset or dict with asset_name : List(asset)
         self.infos = []
         
         # If using 'forecasts' to take decisions, train a custom RNN forecasting model
@@ -107,43 +119,45 @@ class TradingEnv(gym.Env):
         
         return obs
 
+    
     def step(self, action):
         """
         This is the goal--a quantative reward function. 
         agent action as input. 
         outputs is: next state of the environment, the reward, 
         whether the episode has terminated, and an info dict to for debugging purposes.
-        
-        Increment time 
-        Action is either: buy, sit or sell
         """
         # action_space is multidiscrete space with length of assets
         # TODO Iterate through assets and determine corresponding action
-                
-        # Action.BUY:
-        if action == 1:
-            # add to the inventory list the price at the index corresponding to the current
-            # time stamp
-            self.inventory.append(self.observations[self.t])
-            margin = 0  # Could be defined as negative of the price of the asset 
-            reward = 0
-            # print("Buy: " + self.formatPrice(self.observations[self.t]))
+        print('action')
         
-        # Action.SELL:
-        # reward based on profit
-        elif action == 2 and len(self.inventory) > 0:
-            # check the purchase price for the price at the inventory's first index
-            bought_price = self.inventory.pop(0)
-            # remove purchase price to calculate reward
-            margin = self.observations[self.t] - bought_price
-            # penalty does not need to be negative.
-            reward = max(margin, 0)
-            # print("Sell: " + self.formatPrice(self.observations[self.t]) + " | Profit: " + self.formatPrice(margin))
-            
-        else: # (Action.SIT)
-            margin = 0
-            reward = 0
-            # print('No action/sitting, (action = ', action, ')')
+        # index corresponds to insertion order
+        # eg get GOOG by asset_index_list[0]
+        asset_index_list = list(self.observations.keys())
+        
+        # list of ints
+        _action = action.astype(int)
+        print(_action)
+        
+        for i in range(len(_action)):
+            # buy
+            if _action[i] - 10 > 0:
+                # get corresponding asset name
+                asset_name = asset_index_list[i]
+                # todo append quantity of assets from difference in value above
+                self.inventory[i].append(self.observations[asset_name][self.t])
+                margin = 0
+                reward = 0
+            # sell
+            elif _action[i] - 10 < 0 and len(self.inventory[i]) > 0 and self.inventory[i] is not None:
+                # check the purchase price for the price at the inventory's first index
+                bought_price = self.inventory[i].pop(0)
+                # remove purchase price to calculate reward
+                margin = self.observations[asset_name][self.t] - bought_price
+            # sit
+            else:
+                margin = 0
+                reward = 0
 
         self.total_profit += margin
             
@@ -179,7 +193,8 @@ class TradingEnv(gym.Env):
                 dict_writer.writerows(self.infos)    
                 
         return obs, reward, done, info 
-    
+  
+
     # Function to read the asset price time series.
     # Collects the "Close" values and returns them as a list
     def getObservations(self, file):
@@ -198,7 +213,7 @@ class TradingEnv(gym.Env):
             key is asset name and value is
             observations from the corresponding file
         """
-        asset_dict = {}
+        asset_dict = collections.OrderedDict() # maintain assets in insertion order
         for asset in asset_list:
             data_file = '{}{}.csv'.format(data_dir, asset)
             observations = self.getObservations(data_file)
@@ -263,12 +278,15 @@ class TradingEnv(gym.Env):
 
         # Mode "past": State at time t defined as n-day lag in the past
         if mode == 'past':
-            d = t - lag + 1
-            block = observations[d:t + 1] if d >= 0 else -d * [observations[0]] + observations[0:t + 1] # pad with t0
-            res = []
-            for i in range(lag - 1):
-                    res.append(self.sigmoid(block[i + 1] - block[i]))
-            return np.array([res])
+            _res = []
+            for observation in observations.values():
+                d = t - lag + 1
+                block = observation[d:t + 1] if d >= 0 else -d * [observation[0]] + observation[0:t + 1] # pad with t0
+                res = []
+                for i in range(lag - 1):
+                        res.append(self.sigmoid(block[i + 1] - block[i]))    
+                _res.append(res)
+            return np.array([_res])
 
         # Mode "future": State at time t defined as the predicted n-day horizon in the future using RNN
         elif mode == 'future':
