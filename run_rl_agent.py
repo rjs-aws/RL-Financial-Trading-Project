@@ -47,11 +47,11 @@ if mode not in ("train", "evaluate"):
 today = datetime.date.today()
 print('Today is {}, let\'s get going!'.format(today.strftime('%b %d')))
 
+local_mode = True
 sess = sagemaker.session.Session()
 s3_bucket = sess.default_bucket()
 s3_output_path = 's3://{}/'.format(s3_bucket)
 job_name_prefix = 'rl-trading'
-local_mode = False
 role = sagemaker.get_execution_role()
 
 
@@ -85,6 +85,12 @@ elif mode == 'evaluate':
 # The training parameters, such as the instance count, job name, and S3 path for output. 
 # can be trained locally, by using train_instance_type='local_gpu', however this requires a CUDA capable
 # instance to be used for the notebook
+
+if local_mode:
+    instance_type = 'local'
+else:
+    instance_type = 'ml.c5.9xlarge'
+
 estimator = RLEstimator(source_dir='src',
                         entry_point=entryfile,
                         dependencies=["common/sagemaker_rl"],
@@ -93,7 +99,7 @@ estimator = RLEstimator(source_dir='src',
                         framework=RLFramework.MXNET,
                         role=role,
                         train_instance_count=1,
-                        train_instance_type='ml.c5.9xlarge',
+                        train_instance_type=instance_type,
                         output_path=s3_output_path,
                         base_job_name=job_name_prefix,
                         hyperparameters = {"RLCOACH_PRESET" : "preset-trading"})

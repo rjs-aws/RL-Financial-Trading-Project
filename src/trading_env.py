@@ -44,7 +44,7 @@ class TradingEnv(gym.Env):
     def __init__(self,
                  assets = ['GOOG_test', 'AMZN_test', 'MSFT_test', 'AAPL_test'], # TODO: find a way to invoke the constuctor with an argument list 
                  mode = 'past', 
-                 span = 9                
+                 span = 9               
                  ):
              
         NUM_ASSETS = len(assets)
@@ -54,7 +54,7 @@ class TradingEnv(gym.Env):
         self.mode = mode
         self.span = span # number of days in the past/future
         self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
-        self.inventory = [None] * NUM_ASSETS # each index corresponds to the asset, here GOOG is [0] 
+        self.inventory = [[]] * NUM_ASSETS # each index corresponds to the asset, here GOOG is [0] 
 
         # store the "Close" prices from each corresponding csv into a local member dict, key is literal asset name:
         # XXX_test, value is list of prices
@@ -79,14 +79,23 @@ class TradingEnv(gym.Env):
       
         # Results in a discrete space of num_assets.
         # Action contains an index into the list of tuples where (asset_name, action)
-        self.action_space = gym.spaces.Box(0, 21, shape=(4,), dtype=np.uint8) 
-               
+        # should be 4 dim
+        # self.action_space = spaces.Box(low=0, high=21, shape=(1,), dtype=np.float32) 
+
+        # original for now, 21 * NUM_ASSETS
+        self.action_space = gym.spaces.Discrete(84)     
+            
         print(self.action_space)
 
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
-        # (4, 10, 1) (4, 11), (44)
-        self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
+        # (4, span, 1) (4, (span + 1)), (44)
+        
+        # currently doesnt represent the portfolia holdings.
+        total = NUM_ASSETS * (self.span)
+        #self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
+        
+        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (total,), dtype = np.float32)
        
         print(self.observation_space)
         
@@ -117,7 +126,33 @@ class TradingEnv(gym.Env):
         # Define environment data
         obs = self.getState(self.observations, 0, self.span + 1, self.mode)
         
+        print("Obs in reset")
+        print(type(obs))
+        print(obs)
         return obs
+    
+    def step_action(self, corresponding_asset_index, action):
+        NUM_ACTIONS = 21
+        asset_index_list = list(self.observations.keys())
+        asset_name = asset_index_list[corresponding_asset_index]
+        action = action - (corresponding_asset_index * NUM_ACTIONS)
+        margin = reward = None
+        
+        if action - 10 > 0:    
+            self.inventory[corresponding_asset_index].append(self.observations[asset_name][self.t])
+            margin = 0
+            reward = 0
+            print("Bought " + asset_name)
+        elif action - 10 < 0 and len(self.inventory[corresponding_asset_index]) > 0:
+            bought_price = self.inventory[corresponding_asset_index].pop(0)
+            # remove purchase price to calculate reward
+            margin = self.observations[asset_name][self.t] - bought_price
+            reward = max(margin, 0)
+            print("Sold " + asset_name + str(bought_price))
+        else:
+            print("sat")
+            margin = reward = 0
+        return margin, reward
 
     
     def step(self, action):
@@ -127,45 +162,28 @@ class TradingEnv(gym.Env):
         outputs is: next state of the environment, the reward, 
         whether the episode has terminated, and an info dict to for debugging purposes.
         """
-        # action_space is multidiscrete space with length of assets
-        # TODO Iterate through assets and determine corresponding action
-        print('action')
         
-        # index corresponds to insertion order
-        # eg get GOOG by asset_index_list[0]
-        asset_index_list = list(self.observations.keys())
+        if action >= 0 and action <= 21:
+            margin, reward = self.step_action(corresponding_asset_index=0, action=action)
+            
+        elif action > 21 and action <= 42:
+            margin, reward = self.step_action(corresponding_asset_index=1, action=action)
         
-        # list of ints
-        _action = action.astype(int)
-        print(_action)
-        
-        for i in range(len(_action)):
-            # buy
-            if _action[i] - 10 > 0:
-                # get corresponding asset name
-                asset_name = asset_index_list[i]
-                # todo append quantity of assets from difference in value above
-                self.inventory[i].append(self.observations[asset_name][self.t])
-                margin = 0
-                reward = 0
-            # sell
-            elif _action[i] - 10 < 0 and len(self.inventory[i]) > 0 and self.inventory[i] is not None:
-                # check the purchase price for the price at the inventory's first index
-                bought_price = self.inventory[i].pop(0)
-                # remove purchase price to calculate reward
-                margin = self.observations[asset_name][self.t] - bought_price
-            # sit
-            else:
-                margin = 0
-                reward = 0
+        elif action > 42 and action <= 33:
+            margin, reward = self.step_action(corresponding_asset_index=2, action=action)
+            
+        else:
+            margin, reward = self.step_action(corresponding_asset_index=3, action=action)
 
         self.total_profit += margin
             
         # Increment time
         self.t += 1
         
+        
         # Store state for next day
         obs = self.getState(self.observations, self.t, self.span + 1, self.mode)
+        
             
         # The episode ends when the number of timesteps equals the predefined number of steps.
         if self.t >= self.steps:
@@ -180,6 +198,8 @@ class TradingEnv(gym.Env):
             'reward': reward
         }
         
+        print("Info " + str(info))
+        
         # collect debug info internally within the class
         self.infos.append(info)
         
@@ -190,11 +210,14 @@ class TradingEnv(gym.Env):
             with open(self.csv_file, 'a', newline='') as f:
                 dict_writer = csv.DictWriter(f, keys)
                 dict_writer.writeheader()
-                dict_writer.writerows(self.infos)    
-                
-        return obs, reward, done, info 
-  
+                dict_writer.writerows(self.infos)
+        
+        print("Just before return")
 
+        return obs, reward, done, info 
+
+
+                
     # Function to read the asset price time series.
     # Collects the "Close" values and returns them as a list
     def getObservations(self, file):
@@ -278,15 +301,15 @@ class TradingEnv(gym.Env):
 
         # Mode "past": State at time t defined as n-day lag in the past
         if mode == 'past':
-            _res = []
-            for observation in observations.values():
-                d = t - lag + 1
-                block = observation[d:t + 1] if d >= 0 else -d * [observation[0]] + observation[0:t + 1] # pad with t0
-                res = []
+            
+            d = t - lag + 1
+            res = []
+            for asset, asset_observations in observations.items():             
+                block = asset_observations[d:t + 1] if d >= 0 else -d * [asset_observations[0]] + asset_observations[0:t + 1] # pad with t0
                 for i in range(lag - 1):
-                        res.append(self.sigmoid(block[i + 1] - block[i]))    
-                _res.append(res)
-            return np.array([_res])
+                        res.append(self.sigmoid(block[i + 1] - block[i]))
+                # len must be 40, same as total above, in a single dimension
+            return np.array([res])
 
         # Mode "future": State at time t defined as the predicted n-day horizon in the future using RNN
         elif mode == 'future':
