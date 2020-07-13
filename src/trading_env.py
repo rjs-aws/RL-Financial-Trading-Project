@@ -9,6 +9,7 @@ from gym import spaces
 import numpy as np
 import pandas as pd
 import math
+import logging
 import random
 import os
 #os.environ['KERAS_BACKEND'] = 'tensorflow'
@@ -20,15 +21,21 @@ from keras.optimizers import Adam
 from keras.layers.core import Dense, Dropout, Activation
 from config import *
 from actions import Action
-# from collections import deque
 import collections
 from pprint import pprint
 import csv
 import h5py
 
-print('Keras backend is: ', keras.backend.backend())
-    
+now_str = datetime.datetime.now().strftime("%m%d%y_%H:%M")
+logging.basicConfig(
+    filename="{}_run.log".format(now_str), 
+    level=logging.DEBUG, 
+    format="%(asctime)s:%(levelname)s:%(message)s"
+)
 
+# logging.info('Keras backend is: ', str(keras.backend.backend()))
+
+    
 class TradingEnv(gym.Env):
     """
         A simple environment for financial trading
@@ -46,7 +53,7 @@ class TradingEnv(gym.Env):
                  mode = 'past', 
                  span = 9               
                  ):
-             
+        
         NUM_ASSETS = len(assets)
             
         self.csv_file = CSV_DIR # Output filename
@@ -82,22 +89,18 @@ class TradingEnv(gym.Env):
         # should be 4 dim
         # self.action_space = spaces.Box(low=0, high=21, shape=(1,), dtype=np.float32) 
 
-        # original for now, 21 * NUM_ASSETS
+        # 21 * NUM_ASSETS
         self.action_space = gym.spaces.Discrete(84)     
             
-        print(self.action_space)
-
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
         # (4, span, 1) (4, (span + 1)), (44)
         
-        # currently doesnt represent the portfolia holdings.
+        # currently doesnt represent the portfolio holdings.
         total = NUM_ASSETS * (self.span)
         #self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
         
         self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (total,), dtype = np.float32)
-       
-        print(self.observation_space)
         
     # Initializes a training episode.
     def reset(self):
@@ -107,8 +110,6 @@ class TradingEnv(gym.Env):
             inventory: 
             infos: 
         '''
-        print('called reset')
-        
         # Set the state to the initial state--the agent will use this initial state 
         # to take its first action
         self.t = 0 
@@ -126,32 +127,43 @@ class TradingEnv(gym.Env):
         # Define environment data
         obs = self.getState(self.observations, 0, self.span + 1, self.mode)
         
-        print("Obs in reset")
-        print(type(obs))
-        print(obs)
         return obs
     
-    def step_action(self, corresponding_asset_index, action):
+    def _step(self, corresponding_asset_index, action):
         NUM_ACTIONS = 21
+        # assets are stored as an ordered dict
+        # get the corresponding assets from dict
         asset_index_list = list(self.observations.keys())
         asset_name = asset_index_list[corresponding_asset_index]
         action = action - (corresponding_asset_index * NUM_ACTIONS)
         margin = reward = None
         
-        if action - 10 > 0:    
-            self.inventory[corresponding_asset_index].append(self.observations[asset_name][self.t])
+        if action - 10 > 0:
+            # add to the inventory the corresponding asset at the timestamp
+            asset_at_t = self.observations[asset_name][self.t]
+            # self.inventory[corresponding_asset_index].append(self.observations[asset_name][self.t])
+            initial_asset_quantity = len(self.inventory[corresponding_asset_index])
+            # add the corresponding quantity to the inventory
+            self.inventory[corresponding_asset_index].extend([asset_at_t] * (action - 10))
+            # Determine the number purchased
+            after_purchase_asset_quantity = len(self.inventory[corresponding_asset_index])
+            num_purchased = after_purchase_asset_quantity - initial_asset_quantity
             margin = 0
             reward = 0
-            print("Bought " + asset_name)
+            logging.info("Bought {} of {} at {}".format(num_purchased, asset_name, self.observations[asset_name][self.t]))
+        
         elif action - 10 < 0 and len(self.inventory[corresponding_asset_index]) > 0:
+            # get the coresponding number of assets from the list
             bought_price = self.inventory[corresponding_asset_index].pop(0)
             # remove purchase price to calculate reward
             margin = self.observations[asset_name][self.t] - bought_price
             reward = max(margin, 0)
-            print("Sold " + asset_name + str(bought_price))
+            logging.info("Sold {} at {}. Margin: {}".format(asset_name, str(bought_price), str(margin)))
+        
         else:
-            print("sat")
+            logging.info("Sat")
             margin = reward = 0
+        
         return margin, reward
 
     
@@ -159,27 +171,27 @@ class TradingEnv(gym.Env):
         """
         This is the goal--a quantative reward function. 
         agent action as input. 
-        outputs is: next state of the environment, the reward, 
+        the outputs is: next state of the environment, the reward, 
         whether the episode has terminated, and an info dict to for debugging purposes.
         """
+        logging.info("Action {}".format(action))
         
         if action >= 0 and action <= 21:
-            margin, reward = self.step_action(corresponding_asset_index=0, action=action)
+            margin, reward = self._step(corresponding_asset_index=0, action=action)
             
         elif action > 21 and action <= 42:
-            margin, reward = self.step_action(corresponding_asset_index=1, action=action)
+            margin, reward = self._step(corresponding_asset_index=1, action=action)
         
         elif action > 42 and action <= 33:
-            margin, reward = self.step_action(corresponding_asset_index=2, action=action)
+            margin, reward = self._step(corresponding_asset_index=2, action=action)
             
         else:
-            margin, reward = self.step_action(corresponding_asset_index=3, action=action)
+            margin, reward = self._step(corresponding_asset_index=3, action=action)
 
         self.total_profit += margin
             
         # Increment time
         self.t += 1
-        
         
         # Store state for next day
         obs = self.getState(self.observations, self.t, self.span + 1, self.mode)
@@ -198,21 +210,20 @@ class TradingEnv(gym.Env):
             'reward': reward
         }
         
-        print("Info " + str(info))
+        logging.info("Info " + str(info))
         
         # collect debug info internally within the class
         self.infos.append(info)
         
         # At end of episode, print total profit made in this episode and save logs to file 
         if done: 
+            logging.info("Total Profit {}".format(self.total_profit))
             print("Total Profit: " + self.formatPrice(self.total_profit))
             keys = self.infos[0].keys()
             with open(self.csv_file, 'a', newline='') as f:
                 dict_writer = csv.DictWriter(f, keys)
                 dict_writer.writeheader()
                 dict_writer.writerows(self.infos)
-        
-        print("Just before return")
 
         return obs, reward, done, info 
 
@@ -240,7 +251,7 @@ class TradingEnv(gym.Env):
         for asset in asset_list:
             data_file = '{}{}.csv'.format(data_dir, asset)
             observations = self.getObservations(data_file)
-            print('Observations for {} retrieved from {}'.format(asset, data_file))
+            logging.info('Observations for {} retrieved from {}'.format(asset, data_file))
             asset_dict[asset] = observations
         return asset_dict
 
