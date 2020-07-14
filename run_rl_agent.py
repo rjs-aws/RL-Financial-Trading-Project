@@ -132,5 +132,5 @@ sns = boto3.client('sns', region_name='us-west-2')
 sns.publish(
             TopicArn = 'arn:aws:sns:us-west-2:576954791978:RLTopic',
             Subject = 'RL Agent Trading - Job Complete',
-            Message = 'Ready to analyze. S3 output folder: {}{}/output and localfolder: ./{}'.format(s3_output_path, job_name, localout)    
+            Message = 'Ready to analyze. S3 output folder: {}{}/output and local folder: ./{}'.format(s3_output_path, job_name, localout)    
            )

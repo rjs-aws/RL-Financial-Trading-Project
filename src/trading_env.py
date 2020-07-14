@@ -61,7 +61,10 @@ class TradingEnv(gym.Env):
         self.mode = mode
         self.span = span # number of days in the past/future
         self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
-        self.inventory = [[]] * NUM_ASSETS # each index corresponds to the asset, here GOOG is [0] 
+        self.inventory = {} # each key corresponds to the asset, here GOOG is [0] 
+        
+        # construct the inventory
+        for i in range(NUM_ASSETS): self.inventory[i] = []
 
         # store the "Close" prices from each corresponding csv into a local member dict, key is literal asset name:
         # XXX_test, value is list of prices
@@ -89,8 +92,9 @@ class TradingEnv(gym.Env):
         # should be 4 dim
         # self.action_space = spaces.Box(low=0, high=21, shape=(1,), dtype=np.float32) 
 
-        # 21 * NUM_ASSETS
-        self.action_space = gym.spaces.Discrete(84)     
+        # 21 actions for each asset
+        TOTAL_ACTIONS = 21 * NUM_ASSETS
+        self.action_space = gym.spaces.Discrete(TOTAL_ACTIONS)
             
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
@@ -98,8 +102,6 @@ class TradingEnv(gym.Env):
         
         # currently doesnt represent the portfolio holdings.
         total = NUM_ASSETS * (self.span)
-        #self.observation_space = spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
-        
         self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (total,), dtype = np.float32)
         
     # Initializes a training episode.
@@ -143,14 +145,14 @@ class TradingEnv(gym.Env):
             asset_at_t = self.observations[asset_name][self.t]
             # self.inventory[corresponding_asset_index].append(self.observations[asset_name][self.t])
             initial_asset_quantity = len(self.inventory[corresponding_asset_index])
-            # add the corresponding quantity to the inventory
+            # add the corresponding quantity to the inventory, by adding the action number of assets
             self.inventory[corresponding_asset_index].extend([asset_at_t] * (action - 10))
             # Determine the number purchased
             after_purchase_asset_quantity = len(self.inventory[corresponding_asset_index])
             num_purchased = after_purchase_asset_quantity - initial_asset_quantity
             margin = 0
             reward = 0
-            logging.info("Bought {} of {} at {}".format(num_purchased, asset_name, self.observations[asset_name][self.t]))
+            logging.info("Bought {} of {} at {}. Currently have {}".format(num_purchased, asset_name, self.observations[asset_name][self.t], after_purchase_asset_quantity))
         
         elif action - 10 < 0 and len(self.inventory[corresponding_asset_index]) > 0:
             # get the coresponding number of assets from the list
@@ -158,7 +160,7 @@ class TradingEnv(gym.Env):
             # remove purchase price to calculate reward
             margin = self.observations[asset_name][self.t] - bought_price
             reward = max(margin, 0)
-            logging.info("Sold {} at {}. Margin: {}".format(asset_name, str(bought_price), str(margin)))
+            logging.info("Sold {} at {}. Margin: {}, Currently have {}".format(asset_name, str(bought_price), str(margin), len(self.inventory[corresponding_asset_index])))
         
         else:
             logging.info("Sat")
@@ -176,17 +178,19 @@ class TradingEnv(gym.Env):
         """
         logging.info("Action {}".format(action))
         
+            
         if action >= 0 and action <= 21:
             margin, reward = self._step(corresponding_asset_index=0, action=action)
             
         elif action > 21 and action <= 42:
             margin, reward = self._step(corresponding_asset_index=1, action=action)
         
-        elif action > 42 and action <= 33:
+        elif action > 42 and action <= 63:
             margin, reward = self._step(corresponding_asset_index=2, action=action)
             
         else:
             margin, reward = self._step(corresponding_asset_index=3, action=action)
+
 
         self.total_profit += margin
             
