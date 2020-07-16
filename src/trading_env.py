@@ -135,7 +135,7 @@ class TradingEnv(gym.Env):
         
         # Define environment data
         # obs = np.ones((4, self.span, 1))
-        obs = self.get_state(self.observations, self.span)
+        obs = self.get_state(self.observations, 0, self.span + 1)
         
         return obs
     
@@ -226,7 +226,8 @@ class TradingEnv(gym.Env):
         # Store state for next day
 
         # obs = np.ones((4, self.span, 1))
-        obs = self.get_state(self.observations, self.span)
+        obs = self.get_state(self.observations, self.t, self.span + 1)
+
          
         # The episode ends when the number of timesteps equals the predefined number of steps.
         if self.t >= self.steps:
@@ -342,16 +343,18 @@ class TradingEnv(gym.Env):
             model.save(self.rnn_model)
   
 
-    def get_state(self, observations, lag):
+    def get_state(self, observations, t, lag):
         """
             Create the observations for obs space
         """
         state_arr = list()
+        d = t - lag + 1
         for asset, asset_observations in observations.items():
             span_list = list()
+            block = asset_observations[d:t + 1] if d >= 0 else -d * [asset_observations[0]] + asset_observations[0:t + 1] 
             # span days
-            for i in range(lag):
-                span_list.append([asset_observations[i]])
+            for i in range(lag - 1):
+                span_list.append([ self.sigmoid(block[i + 1] - block[i]) ])
             state_arr.append(span_list)
         ret_list = np.array(state_arr)
         return ret_list
