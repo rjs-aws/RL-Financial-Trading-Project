@@ -1,10 +1,10 @@
 import sagemaker
+import boto3
 import pandas as pd
 import numpy as np
 import os
 import sys
 import sys
-import boto3
 from sagemaker.rl import RLEstimator, RLToolkit, RLFramework
 import datetime
 import random

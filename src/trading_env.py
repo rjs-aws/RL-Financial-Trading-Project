@@ -26,7 +26,9 @@ from pprint import pprint
 import csv
 import h5py
 
+# current time string used for the log file
 now_str = datetime.datetime.now().strftime("%m%d%y_%H:%M")
+
 logging.basicConfig(
     filename="{}_run.log".format(now_str), 
     level=logging.DEBUG, 
@@ -63,7 +65,9 @@ class TradingEnv(gym.Env):
         self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
         self.inventory = {} # each key corresponds to the asset, here GOOG is [0] 
         
-        # construct the inventory
+        # construct the inventory: key is index, value is list
+        # upon purchase or sell, the items are removed from the list associated with the 
+        # asset
         for i in range(NUM_ASSETS): self.inventory[i] = []
 
         # store the "Close" prices from each corresponding csv into a local member dict, key is literal asset name:
@@ -85,33 +89,36 @@ class TradingEnv(gym.Env):
         # for the given asset, negative value is sell n stocks for the value.
         # eg: value = 20; 20 - 10 = 10; buy 10 stocks for this asset
         # value = 4; 4 - 10 = -6; sell 6 stocks for this asset
-        
-      
-        # Results in a discrete space of num_assets.
-        # Action contains an index into the list of tuples where (asset_name, action)
-        # should be 4 dim
-        # self.action_space = spaces.Box(low=0, high=21, shape=(1,), dtype=np.float32) 
-
+          
         # 21 actions for each asset
         TOTAL_ACTIONS = 21 * NUM_ASSETS
-        self.action_space = gym.spaces.Discrete(TOTAL_ACTIONS)
+        # self.action_space = gym.spaces.Discrete(TOTAL_ACTIONS)
+        
+        # delete
+        self.action_space = gym.spaces.Box(low=0, high=21, shape=(NUM_ASSETS,), dtype=np.uint8)
             
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
         # (4, span, 1) (4, (span + 1)), (44)
         
         # currently doesnt represent the portfolio holdings.
-        total = NUM_ASSETS * (self.span)
-        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (total,), dtype = np.float32)
+        # total = NUM_ASSETS * (self.span)
+        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
         
-    # Initializes a training episode.
+        print(self.action_space)
+        print(self.observation_space)
+
+        
     def reset(self):
         '''
+            Initializes a training episode.
+            
             t: internal state for timestamp
             total_profit: tracks the accumulated profit
-            inventory: 
-            infos: 
+            inventory: key, value pairs str, List of stocks for each asset_name
+            infos: debugging info, populated during step
         '''
+        
         # Set the state to the initial state--the agent will use this initial state 
         # to take its first action
         self.t = 0 
@@ -127,7 +134,8 @@ class TradingEnv(gym.Env):
         '''
         
         # Define environment data
-        obs = self.getState(self.observations, 0, self.span + 1, self.mode)
+        # obs = np.ones((4, self.span, 1))
+        obs = self.get_state(self.observations, self.span)
         
         return obs
     
@@ -137,33 +145,54 @@ class TradingEnv(gym.Env):
         # get the corresponding assets from dict
         asset_index_list = list(self.observations.keys())
         asset_name = asset_index_list[corresponding_asset_index]
+        
+        # determine the appropriate action
         action = action - (corresponding_asset_index * NUM_ACTIONS)
         margin = reward = None
         
+        # BUY
         if action - 10 > 0:
             # add to the inventory the corresponding asset at the timestamp
             asset_at_t = self.observations[asset_name][self.t]
+            
             # self.inventory[corresponding_asset_index].append(self.observations[asset_name][self.t])
             initial_asset_quantity = len(self.inventory[corresponding_asset_index])
+            
             # add the corresponding quantity to the inventory, by adding the action number of assets
             self.inventory[corresponding_asset_index].extend([asset_at_t] * (action - 10))
+            
             # Determine the number purchased
             after_purchase_asset_quantity = len(self.inventory[corresponding_asset_index])
             num_purchased = after_purchase_asset_quantity - initial_asset_quantity
+            
             margin = 0
             reward = 0
-            logging.info("Bought {} of {} at {}. Currently have {}".format(num_purchased, asset_name, self.observations[asset_name][self.t], after_purchase_asset_quantity))
+            logging.info("Bought {} of {} at {}. Currently Inventory for asset: {}".format(num_purchased, asset_name, self.observations[asset_name][self.t], after_purchase_asset_quantity))
         
-        elif action - 10 < 0 and len(self.inventory[corresponding_asset_index]) > 0:
-            # get the coresponding number of assets from the list
-            bought_price = self.inventory[corresponding_asset_index].pop(0)
+        # SELL
+        elif action - 10 < 0 and len(self.inventory[corresponding_asset_index]) > 0:            
+            # get the coresponding number of assets from the list (we'll need a positive value for the index)
+            sell_assets = self.inventory[corresponding_asset_index][0:abs(action)]
+            bought_price_sum = sum(sell_assets)
+            
+            initial_asset_quantity = len(self.inventory[corresponding_asset_index])
+            
+            # change the inventory to reflect the sold assets
+            self.inventory[corresponding_asset_index] = self.inventory[corresponding_asset_index][abs(action):]
+            
+            final_asset_quantity = len(self.inventory[corresponding_asset_index])
+            
+            num_sold = initial_asset_quantity - final_asset_quantity
+            
             # remove purchase price to calculate reward
-            margin = self.observations[asset_name][self.t] - bought_price
+            margin = sum(self.observations[asset_name][abs(action):self.t]) - bought_price_sum
+            
             reward = max(margin, 0)
-            logging.info("Sold {} at {}. Margin: {}, Currently have {}".format(asset_name, str(bought_price), str(margin), len(self.inventory[corresponding_asset_index])))
+            logging.info("Sold {} of {} at {}. Margin: {}, Current Inventory for asset: {}".format(num_sold, asset_name, str(bought_price_sum), str(margin), len(self.inventory[corresponding_asset_index])))
+        
         
         else:
-            logging.info("Sat")
+            logging.info("Sat on {}".format(asset_name))
             margin = reward = 0
         
         return margin, reward
@@ -176,21 +205,18 @@ class TradingEnv(gym.Env):
         the outputs is: next state of the environment, the reward, 
         whether the episode has terminated, and an info dict to for debugging purposes.
         """
-        logging.info("Action {}".format(action))
         
-            
-        if action >= 0 and action <= 21:
-            margin, reward = self._step(corresponding_asset_index=0, action=action)
-            
-        elif action > 21 and action <= 42:
-            margin, reward = self._step(corresponding_asset_index=1, action=action)
+        _action = action.astype(int)
+        logging.info("Action recieved {}".format(_action))
         
-        elif action > 42 and action <= 63:
-            margin, reward = self._step(corresponding_asset_index=2, action=action)
+        margin = reward = 0
             
-        else:
-            margin, reward = self._step(corresponding_asset_index=3, action=action)
-
+        for i in range(len(_action)):
+            # iterate through the actions
+            _margin, _reward = self._step(corresponding_asset_index=i, action=_action[i])
+            # add the accumulated values during each iteration
+            margin += _margin
+            reward += _reward
 
         self.total_profit += margin
             
@@ -198,9 +224,10 @@ class TradingEnv(gym.Env):
         self.t += 1
         
         # Store state for next day
-        obs = self.getState(self.observations, self.t, self.span + 1, self.mode)
-        
-            
+
+        # obs = np.ones((4, self.span, 1))
+        obs = self.get_state(self.observations, self.span)
+         
         # The episode ends when the number of timesteps equals the predefined number of steps.
         if self.t >= self.steps:
             done = True 
@@ -219,11 +246,14 @@ class TradingEnv(gym.Env):
         # collect debug info internally within the class
         self.infos.append(info)
         
-        # At end of episode, print total profit made in this episode and save logs to file 
+        # At end of episode, print total profit made in this episode and save logs to file
+        # file is appended to at the end of each episode
         if done: 
             logging.info("Total Profit {}".format(self.total_profit))
             print("Total Profit: " + self.formatPrice(self.total_profit))
             keys = self.infos[0].keys()
+            
+            # records margin, reward, timestep, eg 0,0,1
             with open(self.csv_file, 'a', newline='') as f:
                 dict_writer = csv.DictWriter(f, keys)
                 dict_writer.writeheader()
@@ -311,44 +341,37 @@ class TradingEnv(gym.Env):
             # Save model
             model.save(self.rnn_model)
   
+
+    def get_state(self, observations, lag):
+        """
+            Create the observations for obs space
+        """
+        state_arr = list()
+        for asset, asset_observations in observations.items():
+            span_list = list()
+            # span days
+            for i in range(lag):
+                span_list.append([asset_observations[i]])
+            state_arr.append(span_list)
+        ret_list = np.array(state_arr)
+        return ret_list
+            
+
     # Function to define a state at time t:
     def getState(self, observations, t, lag, mode):
-
+        
         # Mode "past": State at time t defined as n-day lag in the past
         if mode == 'past':
             
             d = t - lag + 1
-            res = []
             for asset, asset_observations in observations.items():             
                 block = asset_observations[d:t + 1] if d >= 0 else -d * [asset_observations[0]] + asset_observations[0:t + 1] # pad with t0
+                res = []
                 for i in range(lag - 1):
                         res.append(self.sigmoid(block[i + 1] - block[i]))
-                # len must be 40, same as total above, in a single dimension
-            return np.array([res])
-
-        # Mode "future": State at time t defined as the predicted n-day horizon in the future using RNN
-        elif mode == 'future':
-            rnn = load_model(self.rnn_model)
-            d = t - lag + 1
-            block = observations[d:t + 1] if d >= 0 else -d * [observations[0]] + observations[0:t + 1] # pad with t0
-            horiz = rnn.predict(block)
-            res = []
-            for i in range(lag - 1): # WARNING: Assume size of lag = size of horizon
-                    res.append(self.sigmoid(horiz[i + 1] - horiz[i]))
             return np.array([res])
         
-        # Mode "future_static": State at time t defined as the predicted n-day horizon in the future from pre-computed forecasts
-        elif mode == 'future_static': 
-            horiz = np.load(self.horizons)
-            #block = [observations[t]] + horiz[t] # Add obs for current t to forecasted horizon (1 + 10 = 11 pts => 10 intervals)
-            block = horiz[t]
-            res = []
-            for i in range(lag - 1):
-                    # creates forecast
-                    res.append(self.sigmoid(block[i + 1] - block[i]))
-            return np.array([res])            
         
-
     # Function to format the asset prices
     def formatPrice(self, n):
             return ("-$" if n < 0 else "$") + "{0:.2f}".format(abs(n))

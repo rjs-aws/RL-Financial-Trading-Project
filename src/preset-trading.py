@@ -18,7 +18,7 @@ from rl_coach.memories.memory import MemoryGranularity
 ####################
 
 schedule_params = ScheduleParameters()
-schedule_params.improve_steps = TrainingSteps(20000) # example provided uses 2M
+schedule_params.improve_steps = TrainingSteps(200000) # example provided uses 2M
 schedule_params.steps_between_evaluation_periods = EnvironmentSteps(10000)
 schedule_params.evaluation_steps = EnvironmentEpisodes(5)
 schedule_params.heatup_steps = EnvironmentSteps(0)
@@ -27,7 +27,6 @@ schedule_params.heatup_steps = EnvironmentSteps(0)
 # Clipped PPOAgent #
 ####################
 
-'''
 agent_params = ClippedPPOAgentParameters()
 
 agent_params.network_wrappers['main'].learning_rate = 0.0003
@@ -51,12 +50,12 @@ agent_params.algorithm.num_steps_between_copying_online_weights_to_target = Envi
 agent_params.exploration = EGreedyParameters()
 agent_params.exploration.epsilon_schedule = LinearSchedule(1.0, 0.01, 10000)
 
-'''
 
 #############
 # DQN Agent #
 #############
 
+'''
 agent_params = DQNAgentParameters()
 
 # DQN params
@@ -73,7 +72,7 @@ agent_params.memory.max_size = (MemoryGranularity.Transitions, 40000)
 
 # E-Greedy schedule
 agent_params.exploration.epsilon_schedule = LinearSchedule(1.0, 0.01, 200000)
-
+'''
 
 ###############
 # Environment #
