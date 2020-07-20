@@ -47,7 +47,7 @@ if mode not in ("train", "evaluate"):
 today = datetime.date.today()
 print('Today is {}, let\'s get going!'.format(today.strftime('%b %d')))
 
-local_mode = True
+local_mode = False
 sess = sagemaker.session.Session()
 s3_bucket = sess.default_bucket()
 s3_output_path = 's3://{}/'.format(s3_bucket)

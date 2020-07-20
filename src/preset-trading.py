@@ -18,7 +18,7 @@ from rl_coach.memories.memory import MemoryGranularity
 ####################
 
 schedule_params = ScheduleParameters()
-schedule_params.improve_steps = TrainingSteps(200000) # example provided uses 2M
+schedule_params.improve_steps = TrainingSteps(3500000) # example provided uses 2M
 schedule_params.steps_between_evaluation_periods = EnvironmentSteps(10000)
 schedule_params.evaluation_steps = EnvironmentEpisodes(5)
 schedule_params.heatup_steps = EnvironmentSteps(0)
@@ -48,7 +48,7 @@ agent_params.algorithm.estimate_state_value_using_gae = True
 agent_params.algorithm.num_steps_between_copying_online_weights_to_target = EnvironmentSteps(10000)
 
 agent_params.exploration = EGreedyParameters()
-agent_params.exploration.epsilon_schedule = LinearSchedule(1.0, 0.01, 10000)
+agent_params.exploration.epsilon_schedule = LinearSchedule(1.0, 0.01, 200000)
 
 
 #############

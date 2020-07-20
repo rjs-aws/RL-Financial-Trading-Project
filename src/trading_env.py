@@ -30,7 +30,7 @@ import h5py
 now_str = datetime.datetime.now().strftime("%m%d%y_%H:%M")
 
 logging.basicConfig(
-#     filename="{}_run.log".format(now_str), 
+    filename="{}_run.log".format(now_str), 
     level=logging.DEBUG, 
     format="%(asctime)s:%(levelname)s:%(message)s"
 )
@@ -49,11 +49,10 @@ class TradingEnv(gym.Env):
         observations: dict where Key: assetname, Value: corresponding list of observations for the asset (observations are 'Close' prices from the dataset)
     """
 
-    # The size of the state space--here, the number of previous time steps or forecasted horizon used for decision making
     def __init__(self,
-                 assets = ['GOOG_test', 'AMZN_test', 'MSFT_test', 'AAPL_test'], # TODO: find a way to invoke the constuctor with an argument list 
+                 assets = ['GOOG_test', 'AMZN_test', 'MSFT_test', 'AAPL_test'], # Individual assets corresponding to data sources
                  mode = 'past', 
-                 span = 9               
+                 span = 9 # number of days lag               
                  ):
         
         NUM_ASSETS = len(assets)
@@ -61,18 +60,21 @@ class TradingEnv(gym.Env):
         self.csv_file = CSV_DIR # Output filename
         self.assets = assets
         self.mode = mode
-        self.span = span # number of days in the past/future
+        self.span = span 
+        
         self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
-        self.inventory = {} # each key corresponds to the asset, here GOOG is [0] 
+        
+        # each key corresponds to the asset, here GOOG is [0] 
+        self.inventory = {}
         
         # construct the inventory: key is index, value is list
         # upon purchase or sell, the items are removed from the list associated with the 
-        # asset
+        # asset's index
         for i in range(NUM_ASSETS): self.inventory[i] = []
 
         # store the "Close" prices from each corresponding csv into a local member dict, key is literal asset name:
         # XXX_test, value is list of prices
-        self.observations = self.getAllObservations(assets) 
+        self.observations = self.get_all_observations(assets) 
 
         # TODO: do properly; the number of steps is determined by the length of the test file.
         self.steps = len(self.observations['AMZN_test']) - 1   # Number of time steps in data file
@@ -90,11 +92,8 @@ class TradingEnv(gym.Env):
         # eg: value = 20; 20 - 10 = 10; buy 10 stocks for this asset
         # value = 4; 4 - 10 = -6; sell 6 stocks for this asset
           
-        # 21 actions for each asset
-        TOTAL_ACTIONS = 21 * NUM_ASSETS
-        # self.action_space = gym.spaces.Discrete(TOTAL_ACTIONS)
         
-        # delete
+        # 21 actions for each asset
         self.action_space = gym.spaces.Box(low=0, high=21, shape=(NUM_ASSETS,), dtype=np.uint8)
             
         # Observation space is defined from the data min and max
@@ -102,7 +101,6 @@ class TradingEnv(gym.Env):
         # (4, span, 1) (4, (span + 1)), (44)
         
         # currently doesnt represent the portfolio holdings.
-        # total = NUM_ASSETS * (self.span)
         self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
         
         
@@ -131,7 +129,6 @@ class TradingEnv(gym.Env):
         '''
         
         # Define environment data
-        # obs = np.ones((4, self.span, 1))
         obs = self.get_state(self.observations, 0, self.span + 1)
         
         return obs
@@ -158,49 +155,61 @@ class TradingEnv(gym.Env):
         # BUY
         if action - 10 > 0:
             # add to the inventory the corresponding asset at the timestamp
-            asset_at_t = self.observations[asset_name][self.t]
+            asset_price_at_t = self.observations[asset_name][self.t]
             
-            # self.inventory[corresponding_asset_index].append(self.observations[asset_name][self.t])
+            # determine initial quantity of holdings for asset
             initial_asset_quantity = len(self.inventory[corresponding_asset_index])
             
             # add the corresponding quantity to the inventory, by adding the action number of assets
-            self.inventory[corresponding_asset_index].extend([asset_at_t] * (action - 10))
+            self.inventory[corresponding_asset_index].extend([asset_price_at_t] * (action - 10))
             
             # Determine the number purchased
             after_purchase_asset_quantity = len(self.inventory[corresponding_asset_index])
             num_purchased = after_purchase_asset_quantity - initial_asset_quantity
             
-            # determine $ for a given asset's holdings
+            # determine $ for a given asset's holdings (total amount currently invested in asset)
             total_for_asset = sum(self.inventory[corresponding_asset_index])
             
             margin = 0
             reward = 0
-            logging.info("Bought {} of {} at {}. Currently Inventory quantity for asset: {}. Total Money in asset: {}".format(num_purchased, asset_name, self.observations[asset_name][self.t], after_purchase_asset_quantity, total_for_asset))
+            logging.info("Bought {} of {} at {}. Currently Inventory quantity for asset: {}. Total investment in asset: ${}".format(num_purchased, asset_name, asset_price_at_t, after_purchase_asset_quantity, total_for_asset))
         
         # SELL
         elif action - 10 < 0 and len(self.inventory[corresponding_asset_index]) > 0:            
+            
             # get the coresponding number of assets from the list (we'll need a positive value for the index)
             sell_assets = self.inventory[corresponding_asset_index][0:abs(action - 10)]
-            bought_price_sum = sum(sell_assets)
+            
+            # sum of prices for assets to sell
+            sell_price_sum = sum(sell_assets)
             
             initial_asset_quantity = len(self.inventory[corresponding_asset_index])
             
-            # change the inventory to reflect the sold assets
+            # change the inventory to reflect the sold assets (sells action number of assets from start of inventory)
+            # the inventory for this asset now contains the assets NOT accounted for above (those sold)
             self.inventory[corresponding_asset_index] = self.inventory[corresponding_asset_index][abs(action - 10):]
             
+            # determine current quantity (used for logging)
             final_asset_quantity = len(self.inventory[corresponding_asset_index])
             
+            # determine the quantity sold
             num_sold = initial_asset_quantity - final_asset_quantity
             
-            # remove purchase price to calculate reward
-            margin = sum(self.observations[asset_name][abs(action - 10):self.t]) - bought_price_sum
+            # margin is current price - bought price. Get the current price from the corresponding asset list
+            current_price = self.observations[asset_name][self.t]
+            
+            # margin is the profit from selling action number of assets
+            margin = (current_price * len(sell_assets)) - sell_price_sum
+            
+            # determine $ for a given asset's holdings (total amount currently invested in asset)
+            total_for_asset = sum(self.inventory[corresponding_asset_index])
             
             reward = max(margin, 0)
-            logging.info("Sold {} of {} at {}. Margin: {}, Current Inventory for asset: {}".format(num_sold, asset_name, str(bought_price_sum), str(margin), len(self.inventory[corresponding_asset_index])))
+            logging.info("Sold {} of {} for {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(num_sold, asset_name, str(sell_price_sum), str(margin), len(self.inventory[corresponding_asset_index]), total_for_asset))
         
         
         else:
-            logging.info("Sat on {}".format(asset_name))
+            logging.info("Sat on {}. Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(asset_name, len(self.inventory[corresponding_asset_index]), sum(self.inventory[corresponding_asset_index])))
             margin = reward = 0
         
         return margin, reward
@@ -219,10 +228,9 @@ class TradingEnv(gym.Env):
         
         margin = reward = 0
             
+        # iterate through the actions, and accumulate the margin & reward for each action
         for i in range(len(_action)):
-            # iterate through the actions
             _margin, _reward = self._step(corresponding_asset_index=i, action=_action[i])
-            # add the accumulated values during each iteration
             margin += _margin
             reward += _reward
 
@@ -230,12 +238,6 @@ class TradingEnv(gym.Env):
             
         # Increment time
         self.t += 1
-        
-        # Store state for next day
-
-        # obs = np.ones((4, self.span, 1))
-        obs = self.get_state(self.observations, self.t, self.span + 1)
-
          
         # The episode ends when the number of timesteps equals the predefined number of steps.
         if self.t >= self.steps:
@@ -267,14 +269,20 @@ class TradingEnv(gym.Env):
                 dict_writer = csv.DictWriter(f, keys)
                 dict_writer.writeheader()
                 dict_writer.writerows(self.infos)
-
+        
+        # get state for the following day
+        obs = self.get_state(self.observations, self.t, self.span + 1)
+                
         return obs, reward, done, info 
 
 
-                
-    # Function to read the asset price time series.
-    # Collects the "Close" values and returns them as a list
-    def getObservations(self, file):
+    def get_observations(self, file):
+            """
+                Read asset values from a single file,
+                return list of 'Close' prices.
+                Used internally to store prices for
+                each asset, from each corresponding file.
+            """
             vec = []
             lines = open(file, "r").read().splitlines()
             # ignore header
@@ -284,7 +292,7 @@ class TradingEnv(gym.Env):
             return vec
         
     
-    def getAllObservations(self, asset_list, data_dir="./datasets/"):
+    def get_all_observations(self, asset_list, data_dir="./datasets/"):
         """
             Create an observations dict where
             key is asset name and value is
@@ -293,7 +301,7 @@ class TradingEnv(gym.Env):
         asset_dict = collections.OrderedDict() # maintain assets in insertion order
         for asset in asset_list:
             data_file = '{}{}.csv'.format(data_dir, asset)
-            observations = self.getObservations(data_file)
+            observations = self.get_observations(data_file)
             logging.info('Observations for {} retrieved from {}'.format(asset, data_file))
             asset_dict[asset] = observations
         return asset_dict
@@ -357,7 +365,7 @@ class TradingEnv(gym.Env):
         """
         state_arr = list()
         d = t - lag + 1
-        for asset, asset_observations in observations.items():
+        for _, asset_observations in observations.items():
             span_list = list()
             block = asset_observations[d:t + 1] if d >= 0 else -d * [asset_observations[0]] + asset_observations[0:t + 1] 
             # span days
