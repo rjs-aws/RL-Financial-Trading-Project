@@ -30,7 +30,7 @@ import h5py
 now_str = datetime.datetime.now().strftime("%m%d%y_%H:%M")
 
 logging.basicConfig(
-    filename="{}_run.log".format(now_str), 
+#     filename="{}_run.log".format(now_str), 
     level=logging.DEBUG, 
     format="%(asctime)s:%(levelname)s:%(message)s"
 )
@@ -137,7 +137,8 @@ class TradingEnv(gym.Env):
         """
             Invoked once per asset.
             Performs the corresponding action for
-            the given asset
+            the given asset and calculates the margin
+            and reward for that asset.
         """
 
         # assets are stored as an ordered dict
@@ -147,13 +148,18 @@ class TradingEnv(gym.Env):
         asset_index_list = list(self.observations.keys())
         asset_name = asset_index_list[corresponding_asset_index]
         
-        logging.info("Asset Index: {} Asset name: {} Action Recieved in _step {}".format(corresponding_asset_index, asset_name, action))
+        logging.info("Asset Index: {} Asset name: {} Recieved Action {} in _step".format(corresponding_asset_index, asset_name, action))
         
         # determine the appropriate action
         margin = reward = None
         
+        # record step for logging
+        action_str = None
+        
         # BUY
         if action - 10 > 0:
+            action_str = "BUY"
+            
             # add to the inventory the corresponding asset at the timestamp
             asset_price_at_t = self.observations[asset_name][self.t]
             
@@ -163,6 +169,9 @@ class TradingEnv(gym.Env):
             # add the corresponding quantity to the inventory, by adding the action number of assets
             self.inventory[corresponding_asset_index].extend([asset_price_at_t] * (action - 10))
             
+            # total cost is determined by the current asset's price * the number purchased for the asset
+            total_cost = asset_price_at_t * (action - 10)
+            
             # Determine the number purchased
             after_purchase_asset_quantity = len(self.inventory[corresponding_asset_index])
             num_purchased = after_purchase_asset_quantity - initial_asset_quantity
@@ -170,12 +179,15 @@ class TradingEnv(gym.Env):
             # determine $ for a given asset's holdings (total amount currently invested in asset)
             total_for_asset = sum(self.inventory[corresponding_asset_index])
             
+            # penalize the agent for the purchase
             margin = 0
-            reward = 0
+            reward = -total_cost
+            
             logging.info("Bought {} of {} at {}. Currently Inventory quantity for asset: {}. Total investment in asset: ${}".format(num_purchased, asset_name, asset_price_at_t, after_purchase_asset_quantity, total_for_asset))
         
         # SELL
-        elif action - 10 < 0 and len(self.inventory[corresponding_asset_index]) > 0:            
+        elif action - 10 < 0:
+            action_str = "SELL"
             
             # get the coresponding number of assets from the list (we'll need a positive value for the index)
             sell_assets = self.inventory[corresponding_asset_index][0:abs(action - 10)]
@@ -198,32 +210,42 @@ class TradingEnv(gym.Env):
             # margin is current price - bought price. Get the current price from the corresponding asset list
             current_price = self.observations[asset_name][self.t]
             
-            # margin is the profit from selling action number of assets
-            margin = (current_price * len(sell_assets)) - sell_price_sum
-            
             # determine $ for a given asset's holdings (total amount currently invested in asset)
             total_for_asset = sum(self.inventory[corresponding_asset_index])
             
-            reward = max(margin, 0)
+            # margin is the profit from selling action number of assets
+            margin = (current_price * len(sell_assets)) - sell_price_sum
+            reward = (current_price * len(sell_assets))
+            
             logging.info("Sold {} of {} for {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(num_sold, asset_name, str(sell_price_sum), str(margin), len(self.inventory[corresponding_asset_index]), total_for_asset))
         
-        
+        # SIT
         else:
-            logging.info("Sat on {}. Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(asset_name, len(self.inventory[corresponding_asset_index]), sum(self.inventory[corresponding_asset_index])))
+            action_str = "SIT"
+            
+            logging.info("Sat on {}. Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(asset_name, len(self.inventory[corresponding_asset_index]), sum(self.inventory[corresponding_asset_index])))            
+            
             margin = reward = 0
+
+        
+        logging.info("Action {} - 10 taken = {} Action Type: {} Reward {}".format(action, (action - 10), action_str, reward))
         
         return margin, reward
 
     
     def step(self, action):
         """
-        This is the goal--a quantative reward function. 
-        agent action as input. 
-        the outputs is: next state of the environment, the reward, 
-        whether the episode has terminated, and an info dict to for debugging purposes.
+            This is the goal--a quantative reward function. 
+            agent action as input. 
+            the outputs is: next state of the environment, the reward, 
+            whether the episode has terminated, and an info dict to for debugging purposes.
+            Iterate through the collection of actions, and calculate the margin/reward for each.
         """
         
         _action = action.astype(int)
+        
+        # Reminder: high valued actions correspond to purchases; low values correspond to sell
+        # Ex: 4 -> sell 6; 17 -> buy 7
         logging.info("Actions recieved {}".format(_action))
         
         margin = reward = 0
@@ -249,7 +271,8 @@ class TradingEnv(gym.Env):
         info = {
             'timestep': self.t,
             'margin': margin,
-            'reward': reward
+            'reward': reward,
+            'total_profit': self.total_profit
         }
         
         logging.info("Info " + str(info))
@@ -361,7 +384,7 @@ class TradingEnv(gym.Env):
 
     def get_state(self, observations, t, lag):
         """
-            Get the observations for observation space
+            Create observation space
         """
         state_arr = list()
         d = t - lag + 1
@@ -381,6 +404,7 @@ class TradingEnv(gym.Env):
     def formatPrice(self, n):
             return ("-$" if n < 0 else "$") + "{0:.2f}".format(abs(n))
 
+        
     # Function to return sigmoid
     def sigmoid(self, x):
             return 1 / (1 + math.exp(-x))
@@ -401,3 +425,17 @@ class TradingEnv(gym.Env):
                 asset_name = asset[0: asset.index("_")]
                 asset_dict[asset_name] = asset_csv_data
             return asset_dict
+   
+
+    def _check_inventory_quantity(self):
+        """
+            Returns a integer indicating
+            how many of the assets are empty in
+            the inventory.
+        """
+        num_empty_assets = 0
+        for asset_inventory in self.inventory.values():
+            if not asset_inventory:
+                num_empty_assets += 1
+        return num_empty_assets
+            
