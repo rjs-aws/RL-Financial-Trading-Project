@@ -35,8 +35,6 @@ logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s"
 )
 
-# logging.info('Keras backend is: ', str(keras.backend.backend()))
-
     
 class TradingEnv(gym.Env):
     """
@@ -77,7 +75,7 @@ class TradingEnv(gym.Env):
         self.observations = self.get_all_observations(assets) 
 
         # TODO: do properly; the number of steps is determined by the length of the test file.
-        self.steps = len(self.observations['AMZN_test']) - 1   # Number of time steps in data file
+        self.steps = len(self.observations['GOOG_test']) - 1   # Number of time steps in data file
         
         # RNN model if decision based on forecasted horizon instead of lag
         if self.mode == 'future': 
@@ -100,9 +98,7 @@ class TradingEnv(gym.Env):
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
         # (4, span, 1) (4, (span + 1)), (44)
         
-        # currently doesnt represent the portfolio holdings.
-        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, self.span, 1), dtype = np.float32)
-        
+        self.observation_space = gym.spaces.Box(low = -np.inf, high = np.inf, shape = (NUM_ASSETS, 1, self.span + 1), dtype = np.float32)
         
     def reset(self):
         '''
@@ -129,7 +125,7 @@ class TradingEnv(gym.Env):
         '''
         
         # Define environment data
-        obs = self.get_state(self.observations, 0, self.span + 1)
+        obs = self.get_state(0)
         
         return obs
     
@@ -215,6 +211,7 @@ class TradingEnv(gym.Env):
             
             # margin is the profit from selling action number of assets
             margin = (current_price * len(sell_assets)) - sell_price_sum
+            
             reward = (current_price * len(sell_assets))
             
             logging.info("Sold {} of {} for {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(num_sold, asset_name, str(sell_price_sum), str(margin), len(self.inventory[corresponding_asset_index]), total_for_asset))
@@ -225,7 +222,8 @@ class TradingEnv(gym.Env):
             
             logging.info("Sat on {}. Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(asset_name, len(self.inventory[corresponding_asset_index]), sum(self.inventory[corresponding_asset_index])))            
             
-            margin = reward = 0
+            margin = 0
+            reward = 0
 
         
         logging.info("Action {} - 10 taken = {} Action Type: {} Reward {}".format(action, (action - 10), action_str, reward))
@@ -249,13 +247,20 @@ class TradingEnv(gym.Env):
         logging.info("Actions recieved {}".format(_action))
         
         margin = reward = 0
-            
+        
+        # collect individual margin and rewards for logging
+        margin_list = list()
+        reward_list = list()
+        
         # iterate through the actions, and accumulate the margin & reward for each action
         for i in range(len(_action)):
             _margin, _reward = self._step(corresponding_asset_index=i, action=_action[i])
+            margin_list.append(_margin)
+            reward_list.append(_reward)
             margin += _margin
             reward += _reward
-
+        
+        logging.info('Margins: {}, Rewards: {}'.format(margin_list, reward_list))
         self.total_profit += margin
             
         # Increment time
@@ -267,7 +272,7 @@ class TradingEnv(gym.Env):
         else:
             done = False
             
-        # calculate basic info
+        
         info = {
             'timestep': self.t,
             'margin': margin,
@@ -294,7 +299,7 @@ class TradingEnv(gym.Env):
                 dict_writer.writerows(self.infos)
         
         # get state for the following day
-        obs = self.get_state(self.observations, self.t, self.span + 1)
+        obs = self.get_state(self.t)
                 
         return obs, reward, done, info 
 
@@ -382,19 +387,34 @@ class TradingEnv(gym.Env):
             model.save(self.rnn_model)
   
 
-    def get_state(self, observations, t, lag):
+    def get_state(self, t):
         """
             Create observation space
         """
         state_arr = list()
-        d = t - lag + 1
-        for _, asset_observations in observations.items():
+        # iterate through assets' prices
+        asset_idx = 0
+        for _, asset_observations in self.observations.items():
             span_list = list()
-            block = asset_observations[d:t + 1] if d >= 0 else -d * [asset_observations[0]] + asset_observations[0:t + 1] 
-            # span days
-            for i in range(lag - 1):
-                span_list.append([ self.sigmoid(block[i + 1] - block[i]) ])
-            state_arr.append(span_list)
+            
+            difference = t - self.span
+            if difference < 0:
+                # pad with prices from t0 at the outset
+                for i in range(-difference):
+                    span_list.append(asset_observations[0])
+                for j in range(self.span - (-difference)):
+                    span_list.append(asset_observations[j + 1])
+                print(span_list)
+            else:    
+                for i in range((t - self.span), t):
+                    span_list.append(asset_observations[i])
+
+            num_holdings_for_asset = len(self.inventory[asset_idx])
+            
+            # add the number of holdings to the last index in the span list
+            span_list.append(num_holdings_for_asset)
+            asset_idx += 1
+            state_arr.append([span_list])
         ret_list = np.array(state_arr)
         return ret_list
             
