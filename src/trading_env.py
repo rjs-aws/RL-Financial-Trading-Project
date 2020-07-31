@@ -60,6 +60,9 @@ class TradingEnv(gym.Env):
         self.mode = mode
         self.span = span 
         
+        # total that can be held in the portfolio at a time
+        self.TOTAL = 60
+        
         self.data = self._get_data_sets(assets_list=assets) # collect data from assets' files
         
         # each key corresponds to the asset, here GOOG is [0] 
@@ -77,13 +80,6 @@ class TradingEnv(gym.Env):
         # TODO: do properly; the number of steps is determined by the length of the test file.
         self.steps = len(self.observations['GOOG_test']) - 1   # Number of time steps in data file
         
-        # RNN model if decision based on forecasted horizon instead of lag
-        if self.mode == 'future': 
-            self.rnn_model = CUR_DIR + asset + '-custom-rnn.h5' # Custom RNN model
-        
-        elif self.mode == 'future_static':
-            self.horizons = DATA_DIR + asset + '_horizons.npy' # Horizons pre-calculated with custom RNN model
-        
         # number of actions in discrete action space (0-20), where (value - 10) is
         # the corresponding action to take for the asset. Positive value is buy n stocks
         # for the given asset, negative value is sell n stocks for the value.
@@ -91,8 +87,8 @@ class TradingEnv(gym.Env):
         # value = 4; 4 - 10 = -6; sell 6 stocks for this asset
           
         
-        # 21 actions for each asset
-        self.action_space = gym.spaces.Box(low=0, high=21, shape=(NUM_ASSETS,), dtype=np.uint8)
+        # Each represents the weight of the portfolio
+        self.action_space = gym.spaces.Box(low=0, high=1, shape=(NUM_ASSETS,), dtype=np.float32)
             
         # Observation space is defined from the data min and max
         # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
@@ -116,16 +112,9 @@ class TradingEnv(gym.Env):
         self.total_profit = 0
         self.infos = []
         
-        # If using 'forecasts' to take decisions, train a custom RNN forecasting model
-        ''' Training of RNN done separately, would need reconcile Keras mxnet/tf backend to do it here        
-        if self.mode == 'future':
-            horiz = self.span  # Define size of predicted horizon (e.g. set same as span)
-            nfeatures = 1      # Set nfeatures = 2 (TBD) to use both close and volume as co-factors to make predictions
-            self.trainRNN(self.data, self.span, horiz, nfeatures)
-        '''
         
         # Define environment data
-        obs = self.get_state(0)
+        obs = self.get_state()
         
         return obs
     
@@ -147,26 +136,26 @@ class TradingEnv(gym.Env):
         logging.info("Asset Index: {} Asset name: {} Recieved Action {} in _step".format(corresponding_asset_index, asset_name, action))
         
         # determine the appropriate action
-        margin = reward = None
+        margin = None
         
         # record step for logging
         action_str = None
         
         # BUY
-        if action - 10 > 0:
+        if action > 0:
             action_str = "BUY"
             
             # add to the inventory the corresponding asset at the timestamp
-            asset_price_at_t = self.observations[asset_name][self.t]
+            asset_price_at_t = self._get_current_price_for_asset(asset_name)
             
             # determine initial quantity of holdings for asset
             initial_asset_quantity = len(self.inventory[corresponding_asset_index])
             
             # add the corresponding quantity to the inventory, by adding the action number of assets
-            self.inventory[corresponding_asset_index].extend([asset_price_at_t] * (action - 10))
+            self.inventory[corresponding_asset_index].extend([asset_price_at_t] * (action))
             
             # total cost is determined by the current asset's price * the number purchased for the asset
-            total_cost = asset_price_at_t * (action - 10)
+            total_cost = asset_price_at_t * (action)
             
             # Determine the number purchased
             after_purchase_asset_quantity = len(self.inventory[corresponding_asset_index])
@@ -177,16 +166,16 @@ class TradingEnv(gym.Env):
             
             # penalize the agent for the purchase
             margin = 0
-            reward = -total_cost
+#             reward = 0
             
             logging.info("Bought {} of {} at {}. Currently Inventory quantity for asset: {}. Total investment in asset: ${}".format(num_purchased, asset_name, asset_price_at_t, after_purchase_asset_quantity, total_for_asset))
         
         # SELL
-        elif action - 10 < 0:
+        elif action < 0:
             action_str = "SELL"
             
             # get the coresponding number of assets from the list (we'll need a positive value for the index)
-            sell_assets = self.inventory[corresponding_asset_index][0:abs(action - 10)]
+            sell_assets = self.inventory[corresponding_asset_index][0:abs(action)]
             
             # sum of prices for assets to sell
             sell_price_sum = sum(sell_assets)
@@ -195,7 +184,7 @@ class TradingEnv(gym.Env):
             
             # change the inventory to reflect the sold assets (sells action number of assets from start of inventory)
             # the inventory for this asset now contains the assets NOT accounted for above (those sold)
-            self.inventory[corresponding_asset_index] = self.inventory[corresponding_asset_index][abs(action - 10):]
+            self.inventory[corresponding_asset_index] = self.inventory[corresponding_asset_index][abs(action):]
             
             # determine current quantity (used for logging)
             final_asset_quantity = len(self.inventory[corresponding_asset_index])
@@ -204,7 +193,7 @@ class TradingEnv(gym.Env):
             num_sold = initial_asset_quantity - final_asset_quantity
             
             # margin is current price - bought price. Get the current price from the corresponding asset list
-            current_price = self.observations[asset_name][self.t]
+            current_price = self._get_current_price_for_asset(asset_name)
             
             # determine $ for a given asset's holdings (total amount currently invested in asset)
             total_for_asset = sum(self.inventory[corresponding_asset_index])
@@ -212,7 +201,7 @@ class TradingEnv(gym.Env):
             # margin is the profit from selling action number of assets
             margin = (current_price * len(sell_assets)) - sell_price_sum
             
-            reward = (current_price * len(sell_assets))
+#             reward = max(margin, 0)
             
             logging.info("Sold {} of {} for {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(num_sold, asset_name, str(sell_price_sum), str(margin), len(self.inventory[corresponding_asset_index]), total_for_asset))
         
@@ -223,12 +212,12 @@ class TradingEnv(gym.Env):
             logging.info("Sat on {}. Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(asset_name, len(self.inventory[corresponding_asset_index]), sum(self.inventory[corresponding_asset_index])))            
             
             margin = 0
-            reward = 0
+#             reward = 0
 
         
-        logging.info("Action {} - 10 taken = {} Action Type: {} Reward {}".format(action, (action - 10), action_str, reward))
+        logging.info("Action taken = {} Action Type: {} Margin {}".format(action, action_str, margin))
         
-        return margin, reward
+        return margin
 
     
     def step(self, action):
@@ -240,28 +229,30 @@ class TradingEnv(gym.Env):
             Iterate through the collection of actions, and calculate the margin/reward for each.
         """
         
-        _action = action.astype(int)
+        # normalize weights between 1, 0
+        weights = np.clip(action, 0, 1)
         
-        # Reminder: high valued actions correspond to purchases; low values correspond to sell
-        # Ex: 4 -> sell 6; 17 -> buy 7
-        logging.info("Actions recieved {}".format(_action))
+        # divide each weight by the sum of the weights
+        weights /= (weights.sum() + 0.0000001)
         
-        margin = reward = 0
+        # compensate for when weights are all zeroes
+        weights[0] += np.clip(1 - weights.sum(), 0, 1) 
+
+        np.testing.assert_almost_equal(np.sum(weights), 1.0, 3, err_msg='weights should sum to 1. action="%s"' % weights)
         
-        # collect individual margin and rewards for logging
-        margin_list = list()
-        reward_list = list()
+        # get individual y values
+        y_values = self._get_y_values()
         
-        # iterate through the actions, and accumulate the margin & reward for each action
-        for i in range(len(_action)):
-            _margin, _reward = self._step(corresponding_asset_index=i, action=_action[i])
-            margin_list.append(_margin)
-            reward_list.append(_reward)
-            margin += _margin
-            reward += _reward
+        # w1y1 + w2y2 + w3y3 + w4y4
+        weighted_sum = 0
+        for w,y in zip(weights, y_values):
+            weighted_sum += w * y
         
-        logging.info('Margins: {}, Rewards: {}'.format(margin_list, reward_list))
+        margin = self._balance_portfolio(weights)
+        
         self.total_profit += margin
+        
+        reward = margin
             
         # Increment time
         self.t += 1
@@ -288,8 +279,8 @@ class TradingEnv(gym.Env):
         # At end of episode, print total profit made in this episode and save logs to file
         # file is appended to at the end of each episode
         if done: 
-            logging.info("Total Profit {}".format(self.total_profit))
-            print("Total Profit: " + self.formatPrice(self.total_profit))
+            logging.info("Total Profit for episode {}".format(self.total_profit))
+            print("Total Profit for episode: " + self.formatPrice(self.total_profit))
             keys = self.infos[0].keys()
             
             # records margin, reward, timestep, eg 0,0,1
@@ -299,11 +290,49 @@ class TradingEnv(gym.Env):
                 dict_writer.writerows(self.infos)
         
         # get state for the following day
-        obs = self.get_state(self.t)
+        obs = self.get_state()
                 
         return obs, reward, done, info 
+   
 
+    def _balance_portfolio(self, weights):
+        """
+            Balance the portfolio based on the 
+            weights argument
+        """
+        # key is the asset index, value is the length of current inventory for that asset
+        portfolio_compositon = { asset_idx: len(asset_list) for (asset_idx, asset_list ) in self.inventory.items() }
+        
+        # for ease of reading logs
+        logging.info("Current Portfolio composition: {}, Corresponding Assets {}".format(portfolio_compositon, self.assets))
 
+        
+        # given the weights determine how many of each asset should be held
+        # each index holds how many of each asset should be present to meet the 
+        # targets of the weights
+        portfolio_target_list = [ int(round(w * self.TOTAL)) for w in weights ]
+        
+        # accumulate profit/loss from the buy/sell actions taken to balance
+        margin = 0
+        
+        for target_idx, (asset_idx, num_held) in enumerate(portfolio_compositon.items()):
+            action_to_take = portfolio_target_list[target_idx] - num_held
+            
+            # action for the corresponding asset is perfomed
+            margin += self._step(asset_idx, action_to_take)
+            
+        return margin
+ 
+
+    def _get_current_price_for_asset(self, asset_name):
+        """
+            Given an asset's name, return the current
+            price for that asset (at self.t)
+        """
+        asset_current_price = self.observations[asset_name][self.t]
+        return asset_current_price
+            
+                  
     def get_observations(self, file):
             """
                 Read asset values from a single file,
@@ -333,88 +362,50 @@ class TradingEnv(gym.Env):
             logging.info('Observations for {} retrieved from {}'.format(asset, data_file))
             asset_dict[asset] = observations
         return asset_dict
-
-
-    # Implement a RNN enocoder in case the state is defined based on forecasted horizon
-    def trainRNN(self, data, lag, horiz, nfeatures):
-
-            # Set hyperparameters
-            nunits = 64            # Number of GRUs in recurrent layer
-            nepochs = 10           # Number of epochs
-            d = 0.2                # Percent of neurons to drop at each epoch
-            optimizer = 'adam'     # Optimization algorithm (also tried rmsprop)
-            activ = 'elu'          # Activation function for neurons (elu faster than sigmoid)
-            activr = 'hard_sigmoid'# Activation function for recurrent layer
-            activd = 'linear'      # Dense layer's activation function
-            lossmetric = 'mean_absolute_error'  # Loss function for gradient descent
-            verbose = False        # Whether or not to list results of each epoch
-
-            # Prepare data
-            df = data
-            df["Adjclose"] = df.Close # Moving close price to last column
-            df.drop(['Date','Close','Adj Close'], 1, inplace=True)
-            df = df.diff() 
-            #df = df.replace(np.nan, 0)
-            #scaler = preprocessing.StandardScaler()
-            #for feat in df.columns:
-            #    df[feat] = scaler.fit_transform(df.eval(feat).values.reshape(-1,1))
-
-            data = df.as_matrix()
-            lags = []
-            horizons = []
-            nsample = len(data) - lag - horiz  # Number of time series (Number of sample in 3D)
-            
-            for i in range(nsample):
-                    lags.append(data[i: i + lag , -nfeatures:])
-                    horizons.append(data[i + lag : i + lag + horiz, -1])
-            
-            lags = np.array(lags)
-            horizons = np.array(horizons)
-            print("Number of horizons: ", len(horizons))
-            lags = np.reshape(lags, (lags.shape[0], lags.shape[1], nfeatures))
-
-            # Design RNN architecture
-            rnn_in = Input(shape = (lag, nfeatures), dtype = 'float32', name = 'rnn_in')
-            rnn_gru = GRU(units = nunits, return_sequences = False, activation = activ, recurrent_activation = activr, dropout = d)(rnn_in)
-            rnn_out = Dense(horiz, activation = activd, name = 'rnn_out')(rnn_gru)
-            model = Model(inputs = [rnn_in], outputs = [rnn_out])
-            model.compile(optimizer = optimizer, loss = lossmetric)
-
-            # Train model
-            fcst = model.fit({'rnn_in': lags},{'rnn_out': horizons}, epochs=nepochs,verbose=verbose)
-
-            # Save model
-            model.save(self.rnn_model)
   
 
-    def get_state(self, t):
+    def get_state(self):
         """
             Create observation space
         """
-        state_arr = list()
+        state_arr = list() 
         # iterate through assets' prices
         asset_idx = 0
-        for _, asset_observations in self.observations.items():
+        
+        for asset_name, asset_observations in self.observations.items():
             span_list = list()
             
-            difference = t - self.span
+            difference = self.t - self.span
             if difference < 0:
                 # pad with prices from t0 at the outset
                 for i in range(-difference):
                     span_list.append(asset_observations[0])
                 for j in range(self.span - (-difference)):
                     span_list.append(asset_observations[j + 1])
-                print(span_list)
             else:    
-                for i in range((t - self.span), t):
+                for i in range((self.t - self.span), self.t):
                     span_list.append(asset_observations[i])
-
+            
             num_holdings_for_asset = len(self.inventory[asset_idx])
             
-            # add the number of holdings to the last index in the span list
-            span_list.append(num_holdings_for_asset)
+            # get asset's current price            
+            try:
+                asset_current_price = self._get_current_price_for_asset(asset_name)
+            except:
+                asset_current_price = self.observations[asset_name][len(self.observations[asset_name]) - 1]
+
+            
+            # calculate the total monetary amount based on the inventory for this asset
+            current_total_holdings_price = asset_current_price * num_holdings_for_asset
+                     
+            # add current price * num held in inventory for asset
+            span_list.append(current_total_holdings_price)
+            
             asset_idx += 1
-            state_arr.append([span_list])
+            
+            # normalize the data prior to appending
+            state_arr.append([self._normalize_list(span_list)])
+           
         ret_list = np.array(state_arr)
         return ret_list
             
@@ -458,4 +449,36 @@ class TradingEnv(gym.Env):
             if not asset_inventory:
                 num_empty_assets += 1
         return num_empty_assets
+    
+    
+    def _normalize_list(self, _list):
+        """
+            Apply min-max normalization to the
+            list. In the event min == max, return 
+            [0.0] * len list
+        """
+        max_value = max(_list)
+        min_value = min(_list)
+        if min_value == max_value:
+            # see: scikitlearn's implementation
+            return [0.0 for i in range(len(_list))]
+        else:
+            for i in range(len(_list)):
+                _list[i] = (_list[i] - min_value) / (max_value - min_value)
+        return _list
+
+    
+    def _get_y_values(self):
+        """
+            returns y1, y2, y3, y4
+            where yn = the corresponding asset's price today - 
+            the corresponding asset's price yesterday.
+        """
+        y_values = list()
+        for asset_name, asset_observations in self.observations.items():
+            # yn = asset_price_today / asset_price_yesterday
+            y_val = self._get_current_price_for_asset(asset_name) / self.observations[asset_name][self.t - 1]
+            y_values.append(y_val)
+        y_tup = tuple(y_values)
+        return y_tup[0], y_tup[1], y_tup[2], y_tup[3]
             
