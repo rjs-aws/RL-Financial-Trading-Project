@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import math
 import logging
-import random
 
 # os.environ['KERAS_BACKEND'] = 'tensorflow'
 import keras
@@ -24,7 +23,6 @@ from actions import Action
 import collections
 from pprint import pprint
 import csv
-import h5py
 
 # current time string used for the log file
 now_str = datetime.datetime.now().strftime("%m%d%y_%H:%M")
@@ -156,7 +154,7 @@ class TradingEnv(gym.Env):
         # record step for logging
         action_str = None
 
-        # BUY
+        # BUY the positive quantity from the action
         if action > 0:
             action_str = "BUY"
 
@@ -197,7 +195,7 @@ class TradingEnv(gym.Env):
                 )
             )
 
-        # SELL
+        # SELL the quantity of the action -> abs(action), as action is negative for sell
         elif action < 0:
             action_str = "SELL"
 
@@ -206,7 +204,8 @@ class TradingEnv(gym.Env):
 
             # sum of prices for assets to sell
             sell_price_sum = sum(sell_assets)
-
+            
+            # current inventory size for the asset
             initial_asset_quantity = len(self.inventory[corresponding_asset_index])
 
             # change the inventory to reflect the sold assets (sells action number of assets from start of inventory)
@@ -300,6 +299,7 @@ class TradingEnv(gym.Env):
 
         # w1y1 + w2y2 + w3y3 + w4y4
         weighted_sum = 0
+        
         for w, y in zip(weights, y_values):
             weighted_sum += w * y
 
