@@ -69,23 +69,20 @@ class TradingEnv(gym.Env):
         # this arrangement allows for TOTAL assets to be held at one
         # time.
         self.TOTAL = 60
+        
+        # allocate a certain budget at the start
+        self.budget = 10000
 
         self.data = self._get_data_sets(
             assets_list=assets
         )  # collect data from assets' files
 
-        # each key corresponds to the asset in the order provided via the constructor, here GOOG is [0]
-        self.inventory = {}
-
-        # construct the inventory: key is index, value is list
-        # upon purchase or sell, the items are removed from the list associated with the
-        # asset's index
-        for i in range(NUM_ASSETS):
-            self.inventory[i] = []
-
         # store the "Close" prices from each corresponding csv into a local member dict, key is literal asset name:
         # XXX_test, value is list of prices
         self.observations = self.get_all_observations(assets)
+        
+        # initialize inventory
+        self._initialize_inventory()
         
         # throws assertion error if all assets' observations are not the same length
         self._check_observations_length()
@@ -126,6 +123,12 @@ class TradingEnv(gym.Env):
         self.t = 0
         self.total_profit = 0
         self.infos = []
+        self.budget = 10000
+        
+        # reset the inventory to original state
+        self._initialize_inventory()
+        
+        self
 
         # Define environment data
         obs = self.get_state()
@@ -557,3 +560,28 @@ class TradingEnv(gym.Env):
         for key_name, obs_list in self.observations.items():
             print("len obs list " + str(len(obs_list)) + str(key_name))
             assert len(obs_list) == obs_length, "Observations are not all the same size " + key_name
+            
+    def _determine_purchase_limit(self, asset_name, provided_budget):
+        """
+            Determine the quantity of the given asset that
+            can be purchased while remaining in the intended $ allocation for this asset.
+            @param: asset_name the string for the asset
+            @param: provided_budget the portion $ of the portfolio allocated for this asset
+        """
+        current_asset_price = self._get_price_for_asset_at_time(asset_name)
+        num_to_purchase = math.floor(provided_budget / current_asset_price)
+        return num_to_purchase
+            
+        
+    def _initialize_inventory(self)
+        """
+            Used in c'tor/reset to set the state of the inventory
+        """
+        # each key corresponds to the asset in the order provided via the constructor, here GOOG is [0]
+        self.inventory = {}
+
+        # construct the inventory: key is index, value is list
+        # upon purchase or sell, the items are removed from the list associated with the
+        # asset's index
+        for i in range(NUM_ASSETS):
+            self.inventory[i] = []
