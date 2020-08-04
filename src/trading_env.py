@@ -127,8 +127,6 @@ class TradingEnv(gym.Env):
         
         # reset the inventory to original state
         self._initialize_inventory()
-        
-        self
 
         # Define environment data
         obs = self.get_state()
@@ -356,8 +354,11 @@ class TradingEnv(gym.Env):
 
     def _balance_portfolio(self, weights):
         """
-            Balance the portfolio based on the 
-            weights argument
+            Given the weights of the 
+            intended portfolio,
+            balance the portfolio, and
+            accumulate and return the margin and
+            reward for each corresponding result (buy/sell/sit for the corresponding asset)
         """
         # key is the asset index, value is the length of current inventory for that asset
         portfolio_compositon = {
@@ -490,11 +491,11 @@ class TradingEnv(gym.Env):
         return 1 / (1 + math.exp(-x))
 
     def _get_data_sets(self, assets_list, data_dir="./datasets/"):
-            """
-                Given a list of assets, retrieve and return their datasets.
-                Returns a dictionary where asset name is key (eg. AMZN), corresponding csv data
-                read via pandas is value. Stored in the class internally.
-            """
+        """                
+            Given a list of assets, retrieve and return their datasets.
+            Returns a dictionary where asset name is key (eg. AMZN), corresponding csv data
+            read via pandas is value. Stored in the class internally.
+        """
         asset_dict = {}
         for asset in assets_list:
             # XXXX_test.csv
@@ -573,7 +574,7 @@ class TradingEnv(gym.Env):
         return num_to_purchase
             
         
-    def _initialize_inventory(self)
+    def _initialize_inventory(self):
         """
             Used in c'tor/reset to set the state of the inventory
         """
@@ -583,5 +584,5 @@ class TradingEnv(gym.Env):
         # construct the inventory: key is index, value is list
         # upon purchase or sell, the items are removed from the list associated with the
         # asset's index
-        for i in range(NUM_ASSETS):
+        for i in range(len(self.assets)):
             self.inventory[i] = []
