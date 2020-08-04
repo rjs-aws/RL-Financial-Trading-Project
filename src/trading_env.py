@@ -66,13 +66,15 @@ class TradingEnv(gym.Env):
         self.t = 0
 
         # total that can be held in the portfolio at a time
+        # this arrangement allows for TOTAL assets to be held at one
+        # time.
         self.TOTAL = 60
 
         self.data = self._get_data_sets(
             assets_list=assets
         )  # collect data from assets' files
 
-        # each key corresponds to the asset, here GOOG is [0]
+        # each key corresponds to the asset in the order provided via the constructor, here GOOG is [0]
         self.inventory = {}
 
         # construct the inventory: key is index, value is list
@@ -85,13 +87,13 @@ class TradingEnv(gym.Env):
         # XXX_test, value is list of prices
         self.observations = self.get_all_observations(assets)
         
-        # asserts all assets' observations are the same length
+        # throws assertion error if all assets' observations are not the same length
         self._check_observations_length()
         
-        # TODO: do properly; the number of steps is determined by the length of the input files.
+        # the number of steps is determined by the length of the input files.
         self.steps = (
-            len(self.observations["GOOG_test"]) - 1
-        )  # Number of time steps in data file
+            len(list(self.observations.values())[0]) - 1
+        )
 
         # Each index represents the target weight of the asset in the portfolio
         self.action_space = gym.spaces.Box(
@@ -154,7 +156,7 @@ class TradingEnv(gym.Env):
         # determine the appropriate action
         margin = None
 
-        # record step for logging
+        # record action for logging
         action_str = None
 
         # BUY the positive quantity from the action
@@ -231,7 +233,8 @@ class TradingEnv(gym.Env):
 
             # margin is the profit from selling action number of assets
             margin = (current_price * len(sell_assets)) - sell_price_sum
-
+            
+            # reward is the profit or loss from the sale
             reward = margin
 
             logging.info(
@@ -276,7 +279,7 @@ class TradingEnv(gym.Env):
             whether the episode has terminated, and an info dict to for debugging purposes.
             Iterate through the collection of actions, and calculate the margin/reward for each.
         """
-
+        
         weights = np.clip(action, 0, 1)
 
         # divide each weight by the sum of the weights
@@ -303,10 +306,11 @@ class TradingEnv(gym.Env):
 
         # w1y1 + w2y2 + w3y3 + w4y4
         weighted_sum = 0
-
+        
         for w, y in zip(weights, y_values):
             weighted_sum += w * y
-
+            w *= y
+        
         margin, reward = self._balance_portfolio(weights)
 
         self.total_profit += margin
@@ -360,7 +364,7 @@ class TradingEnv(gym.Env):
 
         # for ease of reading logs
         logging.info(
-            "Current Portfolio composition: {}, Corresponding Assets {}".format(
+            "Current Portfolio composition (pre-balance): {}, Corresponding Assets {}".format(
                 portfolio_compositon, self.assets
             )
         )
@@ -381,7 +385,7 @@ class TradingEnv(gym.Env):
             # subtract each asset's target quantity from the quantity currently held for this asset
             action_to_take = portfolio_target_list[target_idx] - num_held
 
-            # action for the corresponding asset is perfomed
+            # buy/sell/sit (quantity) for the corresponding asset is performed
             _margin, _reward = self._step(asset_idx, action_to_take)
             margin += _margin
             reward += _reward
@@ -437,6 +441,7 @@ class TradingEnv(gym.Env):
             Create observation space
         """
         state_arr = list()
+        
         # iterate through assets' prices
         asset_idx = 0
 
@@ -457,13 +462,8 @@ class TradingEnv(gym.Env):
             num_holdings_for_asset = len(self.inventory[asset_idx])
 
             # get asset's current price
-#             try:
             asset_current_price = self._get_price_for_asset_at_time(asset_name)
-#             except:
-#                 asset_current_price = self._get_price_for_asset_at_time(
-#                     asset_name, len(self.observations[asset_name]) - 1
-#                 )
-
+    
             # calculate the total monetary amount based on the inventory for this asset
             current_total_holdings_price = asset_current_price * num_holdings_for_asset
 
@@ -487,7 +487,7 @@ class TradingEnv(gym.Env):
         return 1 / (1 + math.exp(-x))
 
     def _get_data_sets(self, assets_list, data_dir="./datasets/"):
-        """
+            """
                 Given a list of assets, retrieve and return their datasets.
                 Returns a dictionary where asset name is key (eg. AMZN), corresponding csv data
                 read via pandas is value. Stored in the class internally.
@@ -549,6 +549,7 @@ class TradingEnv(gym.Env):
     def _check_observations_length(self):
         """
             Check that the length of each observation
+            (retrieved from each data set)
             for each asset is the same.
         """
         obs_length = len(list(self.observations.values())[0])
