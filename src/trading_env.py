@@ -26,6 +26,10 @@ import collections
 # current time string used for the log file
 date_now_str = datetime.datetime.now().strftime("%m%d%y_%H:%M")
 
+# if the logging configuration is invoked w/o
+# a filename argument, logs will be written to stdout
+# if a filename is used for the argument, the log file
+# will be written within the running container
 logging.basicConfig(
     #     filename="{}_run.log".format(date_now_str),
     level=logging.DEBUG,
@@ -65,41 +69,34 @@ class TradingEnv(gym.Env):
         self.infos = list()
         self.t = 0
 
-        # total that can be held in the portfolio at a time
         # this arrangement allows for TOTAL assets to be held at one
         # time.
         self.TOTAL = 60
-        
+
         # allocate a certain budget at the start
-        self.budget = 10000
+        self.budget = 10000.00
 
         self.data = self._get_data_sets(
             assets_list=assets
         )  # collect data from assets' files
 
-        # store the "Close" prices from each corresponding csv into a local member dict, key is literal asset name:
-        # XXX_test, value is list of prices
+        # store the "Close" prices from each corresponding csv into a local member dict, 
+        # key is literal asset name: XXX_test, value is list of prices
         self.observations = self.get_all_observations(assets)
-        
+
         # initialize inventory
         self._initialize_inventory()
-        
-        # throws assertion error if all assets' observations are not the same length
+
+        # throws assertion error if all assets' observations are not the same length (ensures files are same length)
         self._check_observations_length()
-        
+
         # the number of steps is determined by the length of the input files.
-        self.steps = (
-            len(list(self.observations.values())[0]) - 1
-        )
+        self.steps = len(list(self.observations.values())[0]) - 1
 
         # Each index represents the target weight of the asset in the portfolio
         self.action_space = gym.spaces.Box(
             low=0, high=1, shape=(NUM_ASSETS,), dtype=np.float32
         )
-
-        # Observation space is defined from the data min and max
-        # Defines the observations the agent receives from the environment, as well as minimum and maximum for continuous observations.
-        # (4, span, 1) (4, (span + 1)), (44)
 
         self.observation_space = gym.spaces.Box(
             low=-np.inf,
@@ -123,8 +120,8 @@ class TradingEnv(gym.Env):
         self.t = 0
         self.total_profit = 0
         self.infos = []
-        self.budget = 10000
-        
+        self.budget = 10000.00
+
         # reset the inventory to original state
         self._initialize_inventory()
 
@@ -139,6 +136,9 @@ class TradingEnv(gym.Env):
             Performs the corresponding action for
             the given asset and calculates the margin
             and reward for that asset.
+            @param corresponding_asset_index the asset's index, uses for retrieving the asset's observations
+            @param action the action to take (-TOTAL, TOTAL), where the action corresponds to the number of that
+            asset to buy or sell (pos is buy; neg is sell)
         """
 
         # assets are stored as an ordered dict
@@ -201,7 +201,7 @@ class TradingEnv(gym.Env):
                 )
             )
 
-        # SELL the quantity of the action -> abs(action), as action is negative for sell
+        # SELL the quantity of the action -> abs(action) used for indexing, as action is negative for sell
         elif action < 0:
             action_str = "SELL"
 
@@ -229,12 +229,12 @@ class TradingEnv(gym.Env):
             # margin is current price - bought price. Get the current price from the corresponding asset list
             current_price = self._get_price_for_asset_at_time(asset_name)
 
-            # determine $ for a given asset's holdings (total amount currently invested in asset)
+            # determine $ for a given asset's holdings (total amount currently invested in this asset)
             total_for_asset = sum(self.inventory[corresponding_asset_index])
 
             # margin is the profit from selling action number of assets
             margin = (current_price * len(sell_assets)) - sell_price_sum
-            
+
             # reward is the profit or loss from the sale
             reward = margin
 
@@ -280,7 +280,7 @@ class TradingEnv(gym.Env):
             whether the episode has terminated, and an info dict to for debugging purposes.
             Iterate through the collection of actions, and calculate the margin/reward for each.
         """
-        
+
         weights = np.clip(action, 0, 1)
 
         # divide each weight by the sum of the weights
@@ -293,7 +293,7 @@ class TradingEnv(gym.Env):
             "all action values should be between 0 and 1. Not %s",
             action,
         )
-        
+
         # throw in the event of unacceptable input
         np.testing.assert_almost_equal(
             np.sum(weights),
@@ -307,16 +307,19 @@ class TradingEnv(gym.Env):
 
         # w1y1 + w2y2 + w3y3 + w4y4
         weighted_sum = 0
-        
+
         for w, y in zip(weights, y_values):
             weighted_sum += w * y
             w *= y
         
+        # [w1y1 w2y2 w3y3 w4y4]
+                     
         margin, reward = self._balance_portfolio(weights)
+        
+        # If using the weighted sum as reward
+        # reward = weighted_sum
 
         self.total_profit += margin
-
-        # Increment time
         self.t += 1
 
         # The episode ends when the number of timesteps equals the predefined number of steps.
@@ -354,11 +357,11 @@ class TradingEnv(gym.Env):
 
     def _balance_portfolio(self, weights):
         """
-            Given the weights of the 
-            intended portfolio,
-            balance the portfolio, and
-            accumulate and return the margin and
+            Given the weights of the portfolio, balance the portfolio, and
+            accumulate and return both the margin and
             reward for each corresponding result (buy/sell/sit for the corresponding asset)
+            @param weights the list of weights used for balancing the portfolio, where each weight represents
+            the portfolio's desired compostion for that asset
         """
         # key is the asset index, value is the length of current inventory for that asset
         portfolio_compositon = {
@@ -366,16 +369,14 @@ class TradingEnv(gym.Env):
             for (asset_idx, asset_list) in self.inventory.items()
         }
 
-        # for ease of reading logs
+        # for readable logs
         logging.info(
             "Current Portfolio composition (pre-balance): {}, Corresponding Assets {}".format(
                 portfolio_compositon, self.assets
             )
         )
 
-        # given the weights determine how many of each asset should be held
-        # each index holds how many of each asset should be present to meet the
-        # targets of the weights
+        # each index is the desired quantity for each asset 
         portfolio_target_list = [int(round(w * self.TOTAL)) for w in weights]
 
         # accumulate profit/loss from the buy/sell actions taken to balance
@@ -389,7 +390,7 @@ class TradingEnv(gym.Env):
             # subtract each asset's target quantity from the quantity currently held for this asset
             action_to_take = portfolio_target_list[target_idx] - num_held
 
-            # buy/sell/sit (quantity) for the corresponding asset is performed
+            # buy/sell (quantity) or sit for the corresponding asset is performed
             _margin, _reward = self._step(asset_idx, action_to_take)
             margin += _margin
             reward += _reward
@@ -401,6 +402,8 @@ class TradingEnv(gym.Env):
             Given an asset's name, return the price
             for that asset at time. Default invocation
             returns the asset's price at the current time
+            @param asset_name the asset (str) to retrieve the price for
+            @param time the timestamp from which to retrieve the price for the asset
         """
         asset_current_price = (
             self.observations[asset_name][time]
@@ -415,6 +418,7 @@ class TradingEnv(gym.Env):
                 return list of 'Close' prices.
                 Used internally to store prices for
                 each asset, from each corresponding file.
+                @param file the assets historical price data
             """
         vec = []
         lines = open(file, "r").read().splitlines()
@@ -426,11 +430,12 @@ class TradingEnv(gym.Env):
 
     def get_all_observations(self, asset_list, data_dir="./datasets/"):
         """
-            Create an observations dict where
+            Create the observations dict where
             key is asset name and value is
             observations from the corresponding file
+            @param asset_list the list of assets in the observations
         """
-        asset_dict = collections.OrderedDict()  # maintain assets in insertion order
+        asset_dict = collections.OrderedDict()  # safety check to assure assets are in insertion order
         for asset in asset_list:
             data_file = "{}{}.csv".format(data_dir, asset)
             observations = self.get_observations(data_file)
@@ -445,7 +450,7 @@ class TradingEnv(gym.Env):
             Create observation space
         """
         state_arr = list()
-        
+
         # iterate through assets' prices
         asset_idx = 0
 
@@ -467,7 +472,7 @@ class TradingEnv(gym.Env):
 
             # get asset's current price
             asset_current_price = self._get_price_for_asset_at_time(asset_name)
-    
+
             # calculate the total monetary amount based on the inventory for this asset
             current_total_holdings_price = asset_current_price * num_holdings_for_asset
 
@@ -522,13 +527,12 @@ class TradingEnv(gym.Env):
         """
             Apply min-max normalization to the
             list. In the event min == max, return 
-            [0.0] * len list
+            [0.0] * len list (adopted from scikitlearn's implementation)
         """
         max_value = max(_list)
         min_value = min(_list)
 
         if min_value == max_value:
-            # see: scikitlearn's implementation
             return [0.0 for i in range(len(_list))]
         else:
             for i in range(len(_list)):
@@ -557,11 +561,12 @@ class TradingEnv(gym.Env):
             for each asset is the same.
         """
         obs_length = len(list(self.observations.values())[0])
-        print("Obs Length " + str(obs_length))
         for key_name, obs_list in self.observations.items():
             print("len obs list " + str(len(obs_list)) + str(key_name))
-            assert len(obs_list) == obs_length, "Observations are not all the same size " + key_name
-            
+            assert len(obs_list) == obs_length, (
+                "Observations are not all the same size " + key_name
+            )
+
     def _determine_purchase_limit(self, asset_name, provided_budget):
         """
             Determine the quantity of the given asset that
@@ -572,11 +577,10 @@ class TradingEnv(gym.Env):
         current_asset_price = self._get_price_for_asset_at_time(asset_name)
         num_to_purchase = math.floor(provided_budget / current_asset_price)
         return num_to_purchase
-            
-        
+
     def _initialize_inventory(self):
         """
-            Used in c'tor/reset to set the state of the inventory
+            Used in c'tor/reset to set the state of the inventory.
         """
         # each key corresponds to the asset in the order provided via the constructor, here GOOG is [0]
         self.inventory = {}
