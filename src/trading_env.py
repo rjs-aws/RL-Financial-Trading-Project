@@ -1,9 +1,3 @@
-"""
-A simple financial trading RL algorithm
-Jeremy David Curuksu, AWS
-2/4/2019
-
-"""
 import gym
 from gym import spaces
 import numpy as np
