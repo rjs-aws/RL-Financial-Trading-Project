@@ -20,3 +20,21 @@ python run_rl_agent.py <your-output-dir> train > run.log &
 python run_rl_agent.py <your-output-dir> evaluate <your-other-outdir> > eval.log &
 ```
 
+### Overview of Action Space, and portfolio balancing
+
+Take for example the following:
+```
+1. Corresponding Assets ['GOOG_test', 'AMZN_test', 'MSFT_test', 'AAPL_test']
+2. Portfolio composition (pre-balance): {0: 3, 1: 20, 2: 31, 3: 6}
+3. Weights :[0.08124855 0.10962831 0.50053082 0.30859232]
+3. Portfolio target list: [5, 7, 30, 19]
+4. Action to take: 2 -13 -1 13
+```
+
+For this composition (2), provided these weights (3), we have a target allocation (3), reached by these 
+corresponding actions (4), where a postive quantity pertains to buying the quantity, and a negative quantity
+pertains to selling this quantity.
+
+
+For each of these buy/sell actions, the inventory quantity for each asset is adjusted. When assets are sold 
+the corresponding profit/loss is added to the total. This same profit/loss is used for rewarding the agent.

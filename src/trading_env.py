@@ -32,14 +32,10 @@ logging.basicConfig(
 
 
 class TradingEnv(gym.Env):
-    """
-        A simple environment for financial trading
-        with Deep Reinforcement Learning
-        
-        asset: the name of the asset to trade
-        mode: Decision can be made on past (using actual past) or future (using RNN forecast)
-        data: datasets directly from the assets' files
-        observations: dict where Key: assetname, Value: corresponding list of observations for the asset (observations are 'Close' prices from the dataset)
+    """ 
+        @param asset: the names of the assets' datasets to trade
+        @param mode: Decision can be made on past (using actual past) or future (using RNN forecast)
+        for the asset (observations are 'Close' prices from the dataset)
     """
 
     def __init__(
@@ -74,7 +70,7 @@ class TradingEnv(gym.Env):
             assets_list=assets
         )  # collect data from assets' files
 
-        # store the "Close" prices from each corresponding csv into a local member dict, 
+        # store the "Close" prices from each corresponding csv into a local member dict,
         # key is literal asset name: XXX_test, value is list of prices
         self.observations = self.get_all_observations(assets)
 
@@ -304,14 +300,13 @@ class TradingEnv(gym.Env):
 
         for w, y in zip(weights, y_values):
             weighted_sum += w * y
-            w *= y
-        
+
         # [w1y1 w2y2 w3y3 w4y4]
-                     
+
         margin, reward = self._balance_portfolio(weights)
-        
+
         # If using the weighted sum as reward
-        # reward = weighted_sum
+        #         reward = weighted_sum
 
         self.total_profit += margin
         self.t += 1
@@ -335,7 +330,6 @@ class TradingEnv(gym.Env):
         # file is appended to at the end of each episode
         if done:
             logging.info("Total Profit for episode {}".format(self.total_profit))
-            print("Total Profit for episode: " + self.formatPrice(self.total_profit))
             keys = self.infos[0].keys()
 
             # records margin, reward, timestep, eg 0,0,1
@@ -370,7 +364,7 @@ class TradingEnv(gym.Env):
             )
         )
 
-        # each index is the desired quantity for each asset 
+        # each index is the desired quantity for each asset
         portfolio_target_list = [int(round(w * self.TOTAL)) for w in weights]
 
         # accumulate profit/loss from the buy/sell actions taken to balance
@@ -429,7 +423,9 @@ class TradingEnv(gym.Env):
             observations from the corresponding file
             @param asset_list the list of assets in the observations
         """
-        asset_dict = collections.OrderedDict()  # safety check to assure assets are in insertion order
+        asset_dict = (
+            collections.OrderedDict()
+        )  # safety check to assure assets are in insertion order
         for asset in asset_list:
             data_file = "{}{}.csv".format(data_dir, asset)
             observations = self.get_observations(data_file)
@@ -446,9 +442,11 @@ class TradingEnv(gym.Env):
         state_arr = list()
 
         # iterate through assets' prices
-        asset_idx = 0
+        for asset_idx, (asset_name, asset_observations) in enumerate(
+            self.observations.items()
+        ):
 
-        for asset_name, asset_observations in self.observations.items():
+            # construct individual list for each asset
             span_list = list()
 
             difference = self.t - self.span
@@ -467,13 +465,11 @@ class TradingEnv(gym.Env):
             # get asset's current price
             asset_current_price = self._get_price_for_asset_at_time(asset_name)
 
-            # calculate the total monetary amount based on the inventory for this asset
+            # calculate the total monetary amount from the total holdings for this asset
             current_total_holdings_price = asset_current_price * num_holdings_for_asset
 
             # add current price * num held in inventory for asset
             span_list.append(current_total_holdings_price)
-
-            asset_idx += 1
 
             # normalize the data prior to appending
             state_arr.append([self._normalize_list(span_list)])
@@ -556,7 +552,6 @@ class TradingEnv(gym.Env):
         """
         obs_length = len(list(self.observations.values())[0])
         for key_name, obs_list in self.observations.items():
-            print("len obs list " + str(len(obs_list)) + str(key_name))
             assert len(obs_list) == obs_length, (
                 "Observations are not all the same size " + key_name
             )
