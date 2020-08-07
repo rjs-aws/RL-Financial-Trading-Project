@@ -104,15 +104,11 @@ class TradingEnv(gym.Env):
             inventory: key, value pairs str, List of stocks for each asset_name
             infos: debugging info, populated during step
         """
-
-        # Set the state to the initial state--the agent will use this initial state
-        # to take its first action
         self.t = 0
         self.total_profit = 0
         self.infos = []
         self.budget = 10000.00
 
-        # reset the inventory to original state
         self._initialize_inventory()
 
         # Define environment data
@@ -402,12 +398,12 @@ class TradingEnv(gym.Env):
 
     def get_observations(self, file):
         """
-                Read asset values from a single file,
-                return list of 'Close' prices.
-                Used internally to store prices for
-                each asset, from each corresponding file.
-                @param file the assets historical price data
-            """
+            Read asset values from a single file,
+            return list of 'Close' prices.
+            Used internally to store prices for
+            each asset, from each corresponding file.                
+            @param file the assets historical price data
+        """
         vec = []
         lines = open(file, "r").read().splitlines()
         # ignore header
@@ -575,7 +571,7 @@ class TradingEnv(gym.Env):
         # each key corresponds to the asset in the order provided via the constructor, here GOOG is [0]
         self.inventory = {}
 
-        # construct the inventory: key is index, value is list
+        # construct the inventory: key is index, value is list where purchases are held
         # upon purchase or sell, the items are removed from the list associated with the
         # asset's index
         for i in range(len(self.assets)):
