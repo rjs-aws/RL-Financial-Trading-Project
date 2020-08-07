@@ -329,7 +329,7 @@ class TradingEnv(gym.Env):
         # At end of episode, print total profit made in this episode and save logs to file
         # file is appended to at the end of each episode
         if done:
-            logging.info("Total Profit for episode {}".format(self.total_profit))
+            logging.info("Total Profit for episode {}".format(self.formatPrice(self.total_profit)))
             keys = self.infos[0].keys()
 
             # records margin, reward, timestep, eg 0,0,1
@@ -549,6 +549,7 @@ class TradingEnv(gym.Env):
             Check that the length of each observation
             (retrieved from each data set)
             for each asset is the same.
+            Throws if every length is not the same.
         """
         obs_length = len(list(self.observations.values())[0])
         for key_name, obs_list in self.observations.items():
