@@ -20,7 +20,8 @@ python run_rl_agent.py <your-output-dir> train > run.log &
 python run_rl_agent.py <your-output-dir> evaluate <your-other-outdir> > eval.log &
 ```
 
-### Overview of Action Space, and portfolio balancing
+## The following applied when running in 'total' mode:
+#### Overview of Action Space, and portfolio balancing
 
 Take for example the following:
 ```

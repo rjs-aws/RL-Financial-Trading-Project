@@ -46,9 +46,12 @@ class TradingEnv(gym.Env):
             "MSFT_test",
             "AAPL_test",
         ],  # Individual assets corresponding to data sources
-        mode="past",
+        mode="budget",
         span=9,  # number of days lag
     ):
+
+        if mode not in ("total", "budget"):
+            raise ValueError("Argument must be either 'budget' or 'total'")
 
         NUM_ASSETS = len(assets)
 
@@ -61,10 +64,14 @@ class TradingEnv(gym.Env):
 
         # this arrangement allows for TOTAL assets to be held at one
         # time.
-        self.TOTAL = 60
+
+        if self.mode == "total":
+            self.TOTAL = 60
 
         # allocate a certain budget at the start
-        self.budget = 10000.00
+
+        if self.mode == "budget":
+            self.budget = 25000.00
 
         self.data = self._get_data_sets(
             assets_list=assets
@@ -107,7 +114,7 @@ class TradingEnv(gym.Env):
         self.t = 0
         self.total_profit = 0
         self.infos = []
-        self.budget = 10000.00
+        self.budget = 25000.00
 
         self._initialize_inventory()
 
@@ -116,7 +123,7 @@ class TradingEnv(gym.Env):
 
         return obs
 
-    def _step(self, corresponding_asset_index, action):
+    def _step(self, corresponding_asset_index, action, using_budget=False):
         """
             Invoked once per asset.
             Performs the corresponding action for
@@ -153,39 +160,57 @@ class TradingEnv(gym.Env):
             # add to the inventory the corresponding asset at the timestamp
             asset_price_at_t = self._get_price_for_asset_at_time(asset_name)
 
-            # determine initial quantity of holdings for asset
-            initial_asset_quantity = len(self.inventory[corresponding_asset_index])
-
-            # add the corresponding quantity to the inventory, by adding the action number of assets
-            self.inventory[corresponding_asset_index].extend(
-                [asset_price_at_t] * (action)
-            )
-
             # total cost is determined by the current asset's price * the number purchased for the asset
             total_cost = asset_price_at_t * (action)
 
-            # Determine the number purchased
-            after_purchase_asset_quantity = len(
-                self.inventory[corresponding_asset_index]
-            )
-            num_purchased = after_purchase_asset_quantity - initial_asset_quantity
-
-            # determine $ for a given asset's holdings (total amount currently invested in asset)
-            total_for_asset = sum(self.inventory[corresponding_asset_index])
-
-            # penalize the agent for the purchase
-            margin = 0
-            reward = 0
-
-            logging.info(
-                "Bought {} of {} at {}. Currently Inventory quantity for asset: {}. Total investment in asset: ${}".format(
-                    num_purchased,
-                    asset_name,
-                    asset_price_at_t,
-                    after_purchase_asset_quantity,
-                    total_for_asset,
+            # attempt to buy over budget
+            # ignore buy attempt; add penalty of the overage
+            if using_budget and self.budget - total_cost < 0:
+                logging.info(
+                    "Over budget attempt in buy: total cost {} - budget {} = {}".format(
+                        total_cost, self.budget, (self.budget - total_cost)
+                    )
                 )
-            )
+                margin = 0
+                reward = self.budget - total_cost
+
+            elif using_budget and self.budget - total_cost > 0 or not using_budget:
+
+                # adjust the budget to account for the purchase
+                if using_budget:
+                    self.budget -= total_cost
+
+                # determine initial quantity of holdings for asset
+                initial_asset_quantity = len(self.inventory[corresponding_asset_index])
+
+                # add the corresponding quantity to the inventory, by adding the action number of assets
+                self.inventory[corresponding_asset_index].extend(
+                    [asset_price_at_t] * (action)
+                )
+
+                # Determine the number purchased
+                after_purchase_asset_quantity = len(
+                    self.inventory[corresponding_asset_index]
+                )
+                num_purchased = after_purchase_asset_quantity - initial_asset_quantity
+
+                # determine $ for a given asset's holdings (total amount currently invested in asset)
+                total_for_asset = sum(self.inventory[corresponding_asset_index])
+
+                # penalize the agent for the purchase
+                margin = 0
+                reward = 0
+
+                logging.info(
+                    "Bought {} of {} at {}. Currently Inventory quantity for asset: {}. Total investment in asset: ${}, Current budget: ${}".format(
+                        num_purchased,
+                        asset_name,
+                        asset_price_at_t,
+                        after_purchase_asset_quantity,
+                        "{:.2f}".format(total_for_asset),
+                        "{:.2f}".format(self.budget),
+                    )
+                )
 
         # SELL the quantity of the action -> abs(action) used for indexing, as action is negative for sell
         elif action < 0:
@@ -221,17 +246,22 @@ class TradingEnv(gym.Env):
             # margin is the profit from selling action number of assets
             margin = (current_price * len(sell_assets)) - sell_price_sum
 
+            # adjust the budget accordingly
+            if using_budget:
+                self.budget += num_sold * current_price
+
             # reward is the profit or loss from the sale
             reward = margin
 
             logging.info(
-                "Sold {} of {} for {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(
+                "Sold {} of {} for {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${} Current Budget: ${}".format(
                     num_sold,
                     asset_name,
                     str(sell_price_sum),
                     str(margin),
                     len(self.inventory[corresponding_asset_index]),
-                    total_for_asset,
+                    "{:.2f}".format(total_for_asset),
+                    "{:.2f}".format(self.budget),
                 )
             )
 
@@ -240,10 +270,11 @@ class TradingEnv(gym.Env):
             action_str = "SIT"
 
             logging.info(
-                "Sat on {}. Current Inventory quantity for asset: {}. Total investment in asset: ${}".format(
+                "Sat on {}. Current Inventory quantity for asset: {}. Total investment in asset: ${} Current budget: ${}".format(
                     asset_name,
                     len(self.inventory[corresponding_asset_index]),
                     sum(self.inventory[corresponding_asset_index]),
+                    self.budget,
                 )
             )
 
@@ -297,12 +328,11 @@ class TradingEnv(gym.Env):
         for w, y in zip(weights, y_values):
             weighted_sum += w * y
 
-        # [w1y1 w2y2 w3y3 w4y4]
+        if self.mode == "budget":
+            margin, reward = self._balance_portfolio_budget(weights)
 
-        margin, reward = self._balance_portfolio(weights)
-
-        # If using the weighted sum as reward
-        #         reward = weighted_sum
+        elif self.mode == "total":
+            margin, reward = self._balance_portfolio_total(weights)
 
         self.total_profit += margin
         self.t += 1
@@ -314,7 +344,8 @@ class TradingEnv(gym.Env):
             "timestep": self.t,
             "margin": margin,
             "reward": reward,
-            "total_profit": self.total_profit,
+            "total_profit": "{:.2f}".format(self.total_profit),
+            "budget": "{:.2f}".format(self.budget),
         }
 
         logging.info("Info " + str(info))
@@ -325,7 +356,11 @@ class TradingEnv(gym.Env):
         # At end of episode, print total profit made in this episode and save logs to file
         # file is appended to at the end of each episode
         if done:
-            logging.info("Total Profit for episode {}".format(self.formatPrice(self.total_profit)))
+            logging.info(
+                "Total Profit for episode {}".format(
+                    self.formatPrice(self.total_profit)
+                )
+            )
             keys = self.infos[0].keys()
 
             # records margin, reward, timestep, eg 0,0,1
@@ -338,48 +373,6 @@ class TradingEnv(gym.Env):
         obs = self.get_state()
 
         return obs, reward, done, info
-
-    def _balance_portfolio(self, weights):
-        """
-            Given the weights of the portfolio, balance the portfolio, and
-            accumulate and return both the margin and
-            reward for each corresponding result (buy/sell/sit for the corresponding asset)
-            @param weights the list of weights used for balancing the portfolio, where each weight represents
-            the portfolio's desired compostion for that asset
-        """
-        # key is the asset index, value is the length of current inventory for that asset
-        portfolio_compositon = {
-            asset_idx: len(asset_list)
-            for (asset_idx, asset_list) in self.inventory.items()
-        }
-
-        # for readable logs
-        logging.info(
-            "Current Portfolio composition (pre-balance): {}, Corresponding Assets {}".format(
-                portfolio_compositon, self.assets
-            )
-        )
-
-        # each index is the desired quantity for each asset
-        portfolio_target_list = [int(round(w * self.TOTAL)) for w in weights]
-
-        # accumulate profit/loss from the buy/sell actions taken to balance
-        margin = 0
-        reward = 0
-
-        for target_idx, (asset_idx, num_held) in enumerate(
-            portfolio_compositon.items()
-        ):
-
-            # subtract each asset's target quantity from the quantity currently held for this asset
-            action_to_take = portfolio_target_list[target_idx] - num_held
-
-            # buy/sell (quantity) or sit for the corresponding asset is performed
-            _margin, _reward = self._step(asset_idx, action_to_take)
-            margin += _margin
-            reward += _reward
-
-        return margin, reward
 
     def _get_price_for_asset_at_time(self, asset_name, time=None):
         """
@@ -576,3 +569,106 @@ class TradingEnv(gym.Env):
         # asset's index
         for i in range(len(self.assets)):
             self.inventory[i] = []
+
+    def _balance_portfolio_budget(self, weights):
+        """
+            Determine the quantity of each asset to buy/sell
+            to meet the target dollar allocation of the assets
+            @param weights each index in this list pertains to the weight of the asset
+            such that the weight for an index * total budget is the target dollar allocation
+            returns a list where each index is the 'action' to perform to achieve the balance
+            (pos is buy quantity, neg is sell quantity)
+        """
+
+        # each index corresponds to the allocated budget based on the weights
+        target_budget_allocations_each_asset = [w * self.budget for w in weights]
+
+        # key is the asset_idx (corresponds to budget above) value is the total $ for the asset
+        current_portfolio_allocation = {
+            asset_idx: sum(asset_list)
+            for (asset_idx, asset_list) in self.inventory.items()
+        }
+        
+        logging.info(
+            "Current Portfolio allocation (pre-balance): {}, Corresponding Assets {}".format(
+                current_portfolio_allocation, self.assets
+            )
+        )
+
+        # each index contains the coresponding buy/sell for each asset
+        action_list = list()
+
+        for idx, (target_budget_alloc, current_alloc) in enumerate(
+            zip(
+                target_budget_allocations_each_asset,
+                current_portfolio_allocation.values(),
+            )
+        ):
+            current_asset_price = self._get_price_for_asset_at_time(self.assets[idx])
+
+            # Buy, to increase the budget allocation for this asset
+            if target_budget_alloc > current_alloc:
+                difference = target_budget_alloc - current_alloc
+                num_to_buy = math.floor(difference / current_asset_price)
+                action_list.append(num_to_buy)
+
+            # Sell, to decrease budget to target for this asset
+            elif target_budget_alloc < current_alloc:
+                difference = current_alloc - target_budget_alloc
+                num_to_sell = math.floor(difference / current_asset_price)
+                action_list.append(-num_to_sell)
+
+            # Same, so sit
+            else:
+                action_list.append(0)
+
+        # invoke step for each action
+        margin = reward = 0
+        for idx, action in enumerate(action_list):
+            _margin, _reward = self._step(idx, action, True)
+            margin += _margin
+            reward += _reward
+
+        return margin, reward
+
+    def _balance_portfolio_total(self, weights):
+        """
+            Given the weights of the portfolio, balance the portfolio, and
+            accumulate and return both the margin and
+            reward for each corresponding result (buy/sell/sit for the corresponding asset)
+            @param weights the list of weights used for balancing the portfolio, where each weight represents
+            the portfolio's desired compostion for that asset
+        """
+        # key is the asset index, value is the length of current inventory for that asset
+        portfolio_compositon = {
+            asset_idx: len(asset_list)
+            for (asset_idx, asset_list) in self.inventory.items()
+        }
+
+        # for readable logs
+        logging.info(
+            "Current Portfolio composition (pre-balance): {}, Corresponding Assets {}".format(
+                portfolio_compositon, self.assets
+            )
+        )
+
+        # each index is the desired quantity for each asset
+        portfolio_target_list = [int(round(w * self.TOTAL)) for w in weights]
+
+        # accumulate profit/loss from the buy/sell actions taken to balance
+        margin = 0
+        reward = 0
+
+        for target_idx, (asset_idx, num_held) in enumerate(
+            portfolio_compositon.items()
+        ):
+
+            # subtract each asset's target quantity from the quantity currently held for this asset
+            action_to_take = portfolio_target_list[target_idx] - num_held
+
+            # buy/sell (quantity) or sit for the corresponding asset is performed
+            _margin, _reward = self._step(asset_idx, action_to_take)
+            margin += _margin
+            reward += _reward
+
+        return margin, reward
