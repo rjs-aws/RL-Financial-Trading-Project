@@ -23,7 +23,7 @@ python run_rl_agent.py <your-output-dir> evaluate <your-other-outdir> > eval.log
 ## The following applied when running in 'total' mode:
 #### Overview of Action Space, and portfolio balancing
 
-Take for example the following:
+Take for example the following, using four assets:
 ```
 1. Corresponding Assets ['GOOG_test', 'AMZN_test', 'MSFT_test', 'AAPL_test']
 2. Portfolio composition (pre-balance): {0: 3, 1: 20, 2: 31, 3: 6}

@@ -33,9 +33,8 @@ logging.basicConfig(
 
 class TradingEnv(gym.Env):
     """ 
-        @param asset: the names of the assets' datasets to trade
+        @param assets: the names of the assets' data files to trade
         @param mode: Decision can be made on past (using actual past) or future (using RNN forecast)
-        for the asset (observations are 'Close' prices from the dataset)
     """
 
     def __init__(
@@ -45,7 +44,8 @@ class TradingEnv(gym.Env):
             "AMZN_test",
             "MSFT_test",
             "AAPL_test",
-        ],  # Individual assets corresponding to data sources
+            "CSCO_test"
+        ],  
         mode="budget",
         span=9,  # number of days lag
     ):
@@ -590,7 +590,7 @@ class TradingEnv(gym.Env):
         }
         
         logging.info(
-            "Current Portfolio allocation (pre-balance): {}, Corresponding Assets {}".format(
+            "Current Portfolio $ allocation (pre-balance): {}, Corresponding Assets {}".format(
                 current_portfolio_allocation, self.assets
             )
         )
@@ -622,8 +622,9 @@ class TradingEnv(gym.Env):
             else:
                 action_list.append(0)
 
-        # invoke step for each action
+        # perform corresponding buy/sell for each asset; accumulate rewards
         margin = reward = 0
+        
         for idx, action in enumerate(action_list):
             _margin, _reward = self._step(idx, action, True)
             margin += _margin
@@ -656,8 +657,7 @@ class TradingEnv(gym.Env):
         portfolio_target_list = [int(round(w * self.TOTAL)) for w in weights]
 
         # accumulate profit/loss from the buy/sell actions taken to balance
-        margin = 0
-        reward = 0
+        margin = reward = 0
 
         for target_idx, (asset_idx, num_held) in enumerate(
             portfolio_compositon.items()
