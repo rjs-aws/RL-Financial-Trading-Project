@@ -83,6 +83,9 @@ class TradingEnv(gym.Env):
 
         # initialize inventory
         self._initialize_inventory()
+        
+        # initial inventory allocation
+        self._initial_asset_allocation_budget(NUM_ASSETS)
 
         # throws assertion error if all assets' observations are not the same length (ensures files are same length)
         self._check_observations_length()
@@ -116,7 +119,9 @@ class TradingEnv(gym.Env):
         self.infos = []
         self.budget = 25000.00
 
+        # create the empty inventory, and allocate the budget
         self._initialize_inventory()
+        self._initial_asset_allocation_budget(len(self.assets))
 
         # Define environment data
         obs = self.get_state()
@@ -329,7 +334,7 @@ class TradingEnv(gym.Env):
             weighted_sum += w * y
 
         if self.mode == "budget":
-            margin, reward = self._balance_portfolio_budget(weights)
+            margin, reward = self._balance_portfolio_budget(weights=weights, budget=self.budget)
 
         elif self.mode == "total":
             margin, reward = self._balance_portfolio_total(weights)
@@ -570,7 +575,7 @@ class TradingEnv(gym.Env):
         for i in range(len(self.assets)):
             self.inventory[i] = []
 
-    def _balance_portfolio_budget(self, weights):
+    def _balance_portfolio_budget(self, weights, budget):
         """
             Determine the quantity of each asset to buy/sell
             to meet the target dollar allocation of the assets
@@ -578,10 +583,11 @@ class TradingEnv(gym.Env):
             such that the weight for an index * total budget is the target dollar allocation
             returns a list where each index is the 'action' to perform to achieve the balance
             (pos is buy quantity, neg is sell quantity)
+            @param budget the budget to allocate (the current budget, excluding initial allocations)
         """
 
         # each index corresponds to the allocated budget based on the weights
-        target_budget_allocations_each_asset = [w * self.budget for w in weights]
+        target_budget_allocations_each_asset = [w * budget for w in weights]
 
         # key is the asset_idx (corresponds to budget above) value is the total $ for the asset
         current_portfolio_allocation = {
@@ -672,3 +678,15 @@ class TradingEnv(gym.Env):
             reward += _reward
 
         return margin, reward
+
+    def _initial_asset_allocation_budget(self, num_assets):
+        """
+            Take the original budget, and allocate equally 
+            between all assets, while leaving a portion of the budget
+            unallocated to allow for purchases
+        """
+        initial_investment_budget = self.budget / 2
+        logging.info("Initializing budget. {} allocated for purchase".format(initial_investment_budget))
+        # for simplicity, allocate all evenly
+        default_weights = [.25] * num_assets
+        self._balance_portfolio_budget(weights=default_weights, budget=initial_investment_budget)
