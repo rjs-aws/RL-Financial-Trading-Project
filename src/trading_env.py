@@ -33,8 +33,9 @@ logging.basicConfig(
 
 class TradingEnv(gym.Env):
     """ 
-        @param assets: the names of the assets' data files to trade
-        @param mode: Decision can be made on past (using actual past) or future (using RNN forecast)
+        @param assets the names of the assets' data files to trade
+        @param mode budget or total: either allocate a budget for the agent, or a total num of stocks to hold
+        @param span number of days lag
     """
 
     def __init__(
@@ -47,7 +48,7 @@ class TradingEnv(gym.Env):
             "CSCO_test"
         ],  
         mode="budget",
-        span=9,  # number of days lag
+        span=9,
     ):
 
         if mode not in ("total", "budget"):
@@ -61,35 +62,30 @@ class TradingEnv(gym.Env):
         self.span = span
         self.infos = list()
         self.t = 0
+        
+        # key is literal asset name: XXX_test, value is list of prices
+        self.observations = self.get_all_observations(assets)
+        
+        # throws assertion error if all assets' observations are not the same length (ensures files are same length)
+        self._check_observations_length()
+
+        # initialize inventory
+        self._initialize_inventory()
 
         # this arrangement allows for TOTAL assets to be held at one
         # time.
-
         if self.mode == "total":
             self.TOTAL = 60
 
         # allocate a certain budget at the start
-
         if self.mode == "budget":
             self.budget = 25000.00
+            self._initial_asset_allocation_budget(NUM_ASSETS)
 
         self.data = self._get_data_sets(
             assets_list=assets
         )  # collect data from assets' files
-
-        # store the "Close" prices from each corresponding csv into a local member dict,
-        # key is literal asset name: XXX_test, value is list of prices
-        self.observations = self.get_all_observations(assets)
-
-        # initialize inventory
-        self._initialize_inventory()
         
-        # initial inventory allocation
-        self._initial_asset_allocation_budget(NUM_ASSETS)
-
-        # throws assertion error if all assets' observations are not the same length (ensures files are same length)
-        self._check_observations_length()
-
         # the number of steps is determined by the length of the input files.
         self.steps = len(list(self.observations.values())[0]) - 1
 
@@ -119,9 +115,11 @@ class TradingEnv(gym.Env):
         self.infos = []
         self.budget = 25000.00
 
-        # create the empty inventory, and allocate the budget
+        # create the empty inventory, and allocate the budget (if using budget)
         self._initialize_inventory()
-        self._initial_asset_allocation_budget(len(self.assets))
+
+        if self.mode == "budget":
+            self._initial_asset_allocation_budget(len(self.assets))
 
         # Define environment data
         obs = self.get_state()
@@ -166,29 +164,29 @@ class TradingEnv(gym.Env):
             asset_price_at_t = self._get_price_for_asset_at_time(asset_name)
 
             # total cost is determined by the current asset's price * the number purchased for the asset
-            total_cost = asset_price_at_t * (action)
+            total_cost = asset_price_at_t * action
 
-            # attempt to buy over budget
-            # ignore buy attempt; add penalty of the overage
+            # attempt to buy over budget, ignore attempt, log failure
             if using_budget and self.budget - total_cost < 0:
                 logging.info(
                     "Over budget attempt in buy: total cost {} - budget {} = {}".format(
                         total_cost, self.budget, (self.budget - total_cost)
                     )
                 )
+                
                 margin = 0
-                reward = self.budget - total_cost
+                reward = 0
 
+            # no budget or desired purchase is possible w/o going over budget
             elif using_budget and self.budget - total_cost > 0 or not using_budget:
 
-                # adjust the budget to account for the purchase
                 if using_budget:
                     self.budget -= total_cost
 
                 # determine initial quantity of holdings for asset
                 initial_asset_quantity = len(self.inventory[corresponding_asset_index])
 
-                # add the corresponding quantity to the inventory, by adding the action number of assets
+                # add the num purchased at current price to the inventory
                 self.inventory[corresponding_asset_index].extend(
                     [asset_price_at_t] * (action)
                 )
@@ -251,7 +249,7 @@ class TradingEnv(gym.Env):
             # margin is the profit from selling action number of assets
             margin = (current_price * len(sell_assets)) - sell_price_sum
 
-            # adjust the budget accordingly
+            # adjust the budget to account for the total dollar change
             if using_budget:
                 self.budget += num_sold * current_price
 
@@ -259,10 +257,11 @@ class TradingEnv(gym.Env):
             reward = margin
 
             logging.info(
-                "Sold {} of {} for {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${} Current Budget: ${}".format(
+                "Sold {} of {} at {} for total: {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${} Current Budget: ${}".format(
                     num_sold,
                     asset_name,
-                    str(sell_price_sum),
+                    current_price,
+                    num_sold * current_price,
                     str(margin),
                     len(self.inventory[corresponding_asset_index]),
                     "{:.2f}".format(total_for_asset),
@@ -324,17 +323,9 @@ class TradingEnv(gym.Env):
             err_msg='weights should sum to 1. action="%s"' % weights,
         )
 
-        # get individual y values
-        y_values = self._get_y_values()
-
-        # w1y1 + w2y2 + w3y3 + w4y4
-        weighted_sum = 0
-
-        for w, y in zip(weights, y_values):
-            weighted_sum += w * y
-
         if self.mode == "budget":
-            margin, reward = self._balance_portfolio_budget(weights=weights, budget=self.budget)
+            total_money = self._get_total_investment_amount() + self.budget
+            margin, reward = self._balance_portfolio_budget(weights=weights, budget=total_money)
 
         elif self.mode == "total":
             margin, reward = self._balance_portfolio_total(weights)
@@ -523,21 +514,6 @@ class TradingEnv(gym.Env):
                 _list[i] = (_list[i] - min_value) / (max_value - min_value)
             return _list
 
-    def _get_y_values(self):
-        """
-            returns y1, y2, y3, y4
-            where yn = the corresponding asset's price today - 
-            the corresponding asset's price yesterday.
-        """
-        y_values = tuple()
-        for asset_name, _ in self.observations.items():
-            # yn = asset_price_today / asset_price_yesterday
-            y_val = self._get_price_for_asset_at_time(
-                asset_name
-            ) / self._get_price_for_asset_at_time(asset_name, self.t - 1)
-            y_values += (y_val,)
-        return y_values
-
     def _check_observations_length(self):
         """
             Check that the length of each observation
@@ -561,12 +537,21 @@ class TradingEnv(gym.Env):
         current_asset_price = self._get_price_for_asset_at_time(asset_name)
         num_to_purchase = math.floor(provided_budget / current_asset_price)
         return num_to_purchase
+    
+    def _get_total_investment_amount(self):
+        """
+            Returns the total $ investment in all assets
+        """
+        total_investment = 0
+        for cash_in_asset in self.inventory.values():
+            total_investment += sum(cash_in_asset)
+        return total_investment
 
     def _initialize_inventory(self):
         """
             Used in c'tor/reset to set the state of the inventory.
         """
-        # each key corresponds to the asset in the order provided via the constructor, here GOOG is [0]
+        # each key corresponds to the asset in the order provided via the constructor, eg GOOG is [0]
         self.inventory = {}
 
         # construct the inventory: key is index, value is list where purchases are held
@@ -684,6 +669,7 @@ class TradingEnv(gym.Env):
             Take the original budget, and allocate equally 
             between all assets, while leaving a portion of the budget
             unallocated to allow for purchases
+            @param num_assets the number of assets in the portfolio
         """
         initial_investment_budget = self.budget / 2
         logging.info("Initializing budget. {} allocated for purchase".format(initial_investment_budget))
