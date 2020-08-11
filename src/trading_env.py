@@ -113,12 +113,12 @@ class TradingEnv(gym.Env):
         self.t = 0
         self.total_profit = 0
         self.infos = []
-        self.budget = 25000.00
 
         # create the empty inventory, and allocate the budget (if using budget)
         self._initialize_inventory()
 
         if self.mode == "budget":
+            self.budget = 25000.00
             self._initial_asset_allocation_budget(len(self.assets))
 
         # Define environment data
@@ -160,7 +160,7 @@ class TradingEnv(gym.Env):
         if action > 0:
             action_str = "BUY"
 
-            # add to the inventory the corresponding asset at the timestamp
+            # add to the inventory the corresponding asset at the current time
             asset_price_at_t = self._get_price_for_asset_at_time(asset_name)
 
             # total cost is determined by the current asset's price * the number purchased for the asset
@@ -324,7 +324,9 @@ class TradingEnv(gym.Env):
         )
 
         if self.mode == "budget":
-            total_money = self._get_total_investment_amount() + self.budget
+            # total available to invest would be the budget (cash currently held; not invested in any assets)
+            # and the total amount available if total holdings are all sold at current price
+            total_money = self._get_total_post_sale_amount() + self.budget
             margin, reward = self._balance_portfolio_budget(weights=weights, budget=total_money)
 
         elif self.mode == "total":
@@ -546,6 +548,22 @@ class TradingEnv(gym.Env):
         for cash_in_asset in self.inventory.values():
             total_investment += sum(cash_in_asset)
         return total_investment
+    
+    def _get_total_post_sale_amount(self):
+        """
+            returns total cash available in the event
+            each assets total inventory was sold now, at current price.
+            Does not include the current budget.
+        """
+        total = 0
+        for asset_idx, asset_list_holdings in self.inventory.items():
+            total_num_for_asset = len(asset_list_holdings)
+            cash_inv_in_asset = sum(asset_list_holdings)
+            assets_current_price = self._get_price_for_asset_at_time(self.assets[asset_idx])
+            # profit/loss for selling all for this asset at the current price
+            margin = (assets_current_price * total_num_for_asset) - cash_inv_in_asset
+            total += (cash_inv_in_asset + margin)
+        return total
 
     def _initialize_inventory(self):
         """
