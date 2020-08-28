@@ -25,7 +25,7 @@ The reward is the cumulative profit/loss resulting from the buying or selling st
 
 Take for example the following, using four assets:
 ```
-1. Corresponding Assets ['GOOG_test', 'AMZN_test', 'MSFT_test', 'AAPL_test']
+1. Corresponding Assets ['Asset_One', 'Asset_Two', 'Asset_Three', 'Asset_Four']
 2. Portfolio composition (pre-balance): {0: 3, 1: 20, 2: 31, 3: 6}
 3. Weights :[0.08124855 0.10962831 0.50053082 0.30859232]
 3. Portfolio target list: [5, 7, 30, 19]
@@ -44,9 +44,8 @@ the corresponding profit/loss is added to the total. This same profit/loss is us
 
 The agent is given a budget, set in the constructor, from which it can purchase assets (25000.00 in its current state)
 
-```_initial_asset_allocation_budget``` is invoked in the constructor and in reset, investing half of the 
-total budget evenly into each asset.
+At the start of each episode, half of the total budget is invested evenly into each asset by invoking ```_initial_asset_allocation_budget```.
 
-At each time step, the agent recieves a vector of weights pertaining to the desired financial balance of the portfolio.
+At each time step, the agent recieves a vector of weights pertaining to the target monetary balance of each asset in the portfolio.
 
-To achieve the target balance, stocks are bought/sold for each asset. The buy/sell process is performed in ```_balance_portfolio_budget```.
+To achieve this balance, stocks are bought/sold for each asset. The buy/sell process is performed in ```_balance_portfolio_budget```.
