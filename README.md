@@ -6,7 +6,7 @@ The second is the local location of the output, the third is the mode (train or 
 
 ```bash
 python run_rl_agent.py <your-output-dir> train > run.log &
-python run_rl_agent.py <your-output-dir> evaluate <your-other-outdir> > eval.log &
+python run_rl_agent.py <your-output-dir> evaluate <your-input-dir-from-training> eval.log &
 ```
 
 ### Overview for 'total'
