@@ -41,17 +41,24 @@ class TradingEnv(gym.Env):
 
     def __init__(
         self,
-        assets=["GOOG_train", "AMZN_train", "MSFT_train", "AAPL_train", "CSCO_train"],
+        assets=[
+            "HMC",
+            "F",
+            "TM",
+        ],  # assets should be just the asset name; the name is converted to XXX_test or XXX_train for use in the class
         mode="total",
+        job_type="test", # use the appropriate argument for testing or training: either 'test' or 'train'
         span=9,
     ):
 
         if mode not in ("total", "budget"):
             raise ValueError("Argument must be either 'budget' or 'total'")
 
+        self._convert_assets_test_train(assets, job_type)
+
         NUM_ASSETS = len(assets)
 
-        self.risk_tolerance_parameter = 10
+        self.risk_tolerance_parameter = 0
 
         # track the rewards; used for risk tolerance
         self.reward_list = list()
@@ -63,7 +70,7 @@ class TradingEnv(gym.Env):
         self.infos = list()
         self.t = 0
 
-        # key is literal asset name: XXX_train, value is list of prices
+        # key is literal asset name: XXX_test, value is list of prices
         self.observations = self.get_all_observations(assets)
 
         # throws assertion error if all assets' observations are not the same length (ensures files are same length)
@@ -100,6 +107,24 @@ class TradingEnv(gym.Env):
             shape=(NUM_ASSETS, 1, self.span + 1),
             dtype=np.float32,
         )
+
+        logging.debug(
+            "Mode: '{}', Job Type: '{}', Lambda (risk tolerance) Value: '{}'".format(
+                self.mode, job_type, self.risk_tolerance_parameter
+            )
+        )
+
+    def _convert_assets_test_train(self, assets, mode):
+        """
+        Convert the names of the assets from the simple asset name
+        to the name of the appropriate data set (XXX_test, XXX_train)
+        for internal use within the class
+        """
+        if mode not in ("test", "train"):
+            raise ValueError("Argument must be either 'test' or train")
+        for i in range(len(assets)):
+            assets[i] = assets[i] + "_{}".format(mode)
+        logging.debug("Using mode {} Converted asset names: {}".format(mode, assets))
 
     def reset(self):
         """
@@ -297,8 +322,9 @@ class TradingEnv(gym.Env):
             # reward is the profit or loss from the sale
 
             # for testing
-            # reward = max(margin, 0)
-            reward = margin
+            reward = max(margin, 0)
+
+            #             reward = margin
 
             logging.info(
                 "Sold {} of {} at {} for total: {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${} Current Budget: ${}".format(
@@ -329,7 +355,7 @@ class TradingEnv(gym.Env):
             margin = 0
             reward = 0
 
-        logging.info(
+        logging.debug(
             "Action taken = {} Action Type: {} Margin {}".format(
                 action, action_str, margin
             )
@@ -538,10 +564,10 @@ class TradingEnv(gym.Env):
         """
         asset_dict = {}
         for asset in assets_list:
-            # XXXX_train.csv
+            # XXXX_test.csv
             data_file = "{}{}.csv".format(data_dir, asset)
             asset_csv_data = pd.read_csv(data_file)
-            # remove _train from asset name
+            # remove _test from asset name
             asset_name = asset[0 : asset.index("_")]
             asset_dict[asset_name] = asset_csv_data
         return asset_dict
@@ -580,9 +606,11 @@ class TradingEnv(gym.Env):
         (retrieved from each data set)
         for each asset is the same.
         Throws if every length is not the same.
+        Avoid issues from input files of different lengths.
         """
         obs_length = len(list(self.observations.values())[0])
         for key_name, obs_list in self.observations.items():
+            logging.debug("{}: length: {}".format(key_name, len(obs_list)))
             assert len(obs_list) == obs_length, (
                 "Observations are not all the same size " + key_name
             )
@@ -665,7 +693,7 @@ class TradingEnv(gym.Env):
             for (asset_idx, asset_list) in self.inventory.items()
         }
 
-        logging.info(
+        logging.debug(
             "Current Portfolio $ allocation (pre-balance): {}, Corresponding Assets {}".format(
                 current_portfolio_allocation, self.assets
             )
@@ -723,7 +751,7 @@ class TradingEnv(gym.Env):
         }
 
         # for readable logs
-        logging.info(
+        logging.debug(
             "Current Portfolio composition (pre-balance): {}, Corresponding Assets {}".format(
                 portfolio_compositon, self.assets
             )
@@ -778,6 +806,6 @@ class TradingEnv(gym.Env):
         """
         penalty = -self.risk_tolerance_parameter * statistics.variance(self.reward_list)
         risk_tolerance_rew = penalty + current_reward
-        logging.info("Penalty: {}".format(penalty))
-        logging.info("Original Reward: {}".format(current_reward))
+        logging.debug("Penalty: {}".format(penalty))
+        logging.debug("Original Reward: {}".format(current_reward))
         return risk_tolerance_rew
