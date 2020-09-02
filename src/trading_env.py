@@ -18,43 +18,47 @@ from config import *
 from actions import Action
 import collections
 
-# current time string used for the log file
+
+"""
+if the logging configuration is invoked w/o
+a filename argument, logs will be written to stdout.
+
+if a filename is used for the argument, the log file
+will be written within the running container.
+
+Using stdout is easier for debugging during a running job
+stdout also allows logs to be viewed in CloudWatch
+"""
+
 date_now_str = datetime.datetime.now().strftime("%m%d%y_%H:%M")
 
-# if the logging configuration is invoked w/o
-# a filename argument, logs will be written to stdout
-# if a filename is used for the argument, the log file
-# will be written within the running container
 logging.basicConfig(
     #     filename="{}_run.log".format(date_now_str),
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s:%(levelname)s:%(message)s",
 )
 
 
 class TradingEnv(gym.Env):
     """
-    @param assets the names of the assets' data files to trade
+    @param assets the names of the assets' data files to trade assets should be just the asset name; the name is converted to XXX_test or XXX_train for use in the class
     @param mode budget or total: either allocate a budget for the agent, or a total num of stocks to hold
     @param span number of days lag
+    @param job_type test or train
     """
 
     def __init__(
         self,
-        assets=[
-            "HMC",
-            "F",
-            "TM",
-        ],  # assets should be just the asset name; the name is converted to XXX_test or XXX_train for use in the class
-        mode="total",
-        job_type="test", # use the appropriate argument for testing or training: either 'test' or 'train'
+        assets=["F", "HMC", "TM"],
+        mode="budget",
+        job_type="train",  # use the appropriate argument for testing or training: either 'test' or 'train'
         span=9,
     ):
 
         if mode not in ("total", "budget"):
             raise ValueError("Argument must be either 'budget' or 'total'")
 
-        self._convert_assets_test_train(assets, job_type)
+        self._convert_assets_job_type(assets, job_type)
 
         NUM_ASSETS = len(assets)
 
@@ -70,23 +74,23 @@ class TradingEnv(gym.Env):
         self.infos = list()
         self.t = 0
 
-        # key is literal asset name: XXX_test, value is list of prices
+        # key is the name of the asset's dataset: XXX_test/XXX_train value is list of prices
+        # from that dataset
         self.observations = self.get_all_observations(assets)
 
-        # throws assertion error if all assets' observations are not the same length (ensures files are same length)
+        # throws assertion error if all assets' observations are not the same length (ensures input data srcs are same length)
         self._check_observations_length()
 
         # initialize inventory
         self._initialize_inventory()
 
-        # this arrangement allows for TOTAL assets to be held at one
-        # time.
+        # constrains the agent to holding TOTAL number of assets
         if self.mode == "total":
             self.TOTAL = 60
 
         # allocate a certain budget at the start
         if self.mode == "budget":
-            self.budget = 25000.00
+            self.budget = 50000.00
             self._initial_asset_allocation_budget(NUM_ASSETS)
 
         self.data = self._get_data_sets(
@@ -114,11 +118,15 @@ class TradingEnv(gym.Env):
             )
         )
 
-    def _convert_assets_test_train(self, assets, mode):
+    def _convert_assets_job_type(self, assets, mode):
         """
         Convert the names of the assets from the simple asset name
         to the name of the appropriate data set (XXX_test, XXX_train)
         for internal use within the class
+        @param assets the list of data sources
+        @param job_type testing or training. The type of job type converts the
+        asset names to the appropriate name for training or testing, so the
+        appropriate data sets can be used for the job.
         """
         if mode not in ("test", "train"):
             raise ValueError("Argument must be either 'test' or train")
@@ -177,11 +185,9 @@ class TradingEnv(gym.Env):
             )
         )
 
-        # determine the appropriate action
-        margin = None
-
-        # record action for logging
-        action_str = None
+        margin = 0.0
+        # for logging type of (buy,sell,sit)
+        action_str = ""
 
         # BUY the positive quantity from the action
         if action > 0:
@@ -319,12 +325,10 @@ class TradingEnv(gym.Env):
             if using_budget:
                 self.budget += num_sold * current_price
 
-            # reward is the profit or loss from the sale
+            # for testing: reward = max(margin, 0)
 
-            # for testing
-            reward = max(margin, 0)
-
-            #             reward = margin
+            # reward the agent with the profit/losses from selling
+            reward = margin
 
             logging.info(
                 "Sold {} of {} at {} for total: {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${} Current Budget: ${}".format(
