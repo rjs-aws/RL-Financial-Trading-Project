@@ -61,6 +61,7 @@ class TradingEnv(gym.Env):
         self._convert_assets_job_type(assets, job_type)
 
         NUM_ASSETS = len(assets)
+        self.BUDGET_AMT = 50000
 
         self.risk_tolerance_parameter = 0
 
@@ -90,7 +91,7 @@ class TradingEnv(gym.Env):
 
         # allocate a certain budget at the start
         if self.mode == "budget":
-            self.budget = 50000.00
+            self.budget = self.BUDGET_AMT
             self._initial_asset_allocation_budget(NUM_ASSETS)
 
         self.data = self._get_data_sets(
@@ -153,7 +154,7 @@ class TradingEnv(gym.Env):
         self._initialize_inventory()
 
         if self.mode == "budget":
-            self.budget = 25000.00
+            self.budget = self.BUDGET_AMT
             self._initial_asset_allocation_budget(len(self.assets))
 
         # Define environment data
