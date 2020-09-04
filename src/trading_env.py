@@ -50,7 +50,7 @@ class TradingEnv(gym.Env):
     def __init__(
         self,
         assets=["F", "HMC", "TM"],
-        mode="budget",
+        mode="total",
         job_type="train",  # use the appropriate argument for testing or training: either 'test' or 'train'
         span=9,
     ):
@@ -61,7 +61,7 @@ class TradingEnv(gym.Env):
         self._convert_assets_job_type(assets, job_type)
 
         NUM_ASSETS = len(assets)
-        self.BUDGET_AMT = 50000
+        self.BUDGET_AMT = 50000.00
 
         self.risk_tolerance_parameter = 0
 
@@ -87,7 +87,7 @@ class TradingEnv(gym.Env):
 
         # constrains the agent to holding TOTAL number of assets
         if self.mode == "total":
-            self.TOTAL = 60
+            self.TOTAL = 120
 
         # allocate a certain budget at the start
         if self.mode == "budget":
@@ -326,10 +326,11 @@ class TradingEnv(gym.Env):
             if using_budget:
                 self.budget += num_sold * current_price
 
-            # for testing: reward = max(margin, 0)
+            # for testing: 
+            reward = max(margin, 0)
 
             # reward the agent with the profit/losses from selling
-            reward = margin
+            # reward = margin
 
             logging.info(
                 "Sold {} of {} at {} for total: {}. Margin: {}, Current Inventory quantity for asset: {}. Total investment in asset: ${} Current Budget: ${}".format(
@@ -786,13 +787,15 @@ class TradingEnv(gym.Env):
         """
         Take the original budget, and allocate equally
         between all assets, while leaving a portion of the budget
-        unallocated to allow for purchases
+        unallocated to allow for purchases. Adjust the calculation
+        for the initial budget to allow for more/less cash to be held
+        at the beginning of each episode.
         @param num_assets the number of assets in the portfolio
         """
-        initial_investment_budget = self.budget / 2
+        initial_investment_budget = self.budget * .5
         logging.info(
-            "Initializing budget. {} allocated for purchase".format(
-                initial_investment_budget
+            "Initializing budget. {} initially allocated for purchase. Total Budget: {}".format(
+                initial_investment_budget, self.budget
             )
         )
         # for simplicity, allocate all evenly
